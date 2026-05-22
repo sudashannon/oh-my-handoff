@@ -65,16 +65,9 @@ handoff_count: 3        # 第几次 handoff
 - [OpenCode](https://opencode.ai) >= 1.15.6
 - OpenCode DCP plugin（`@tarquinen/opencode-dcp@latest`）— 用于自动压缩
 
-### 步骤 1: 复制 Artifact 模板到工作目录
+### 步骤 1: 安装 Plugin（Hook 层）— 同时完成步骤 1 和 2
 
-在你项目的根目录下：
-
-```bash
-mkdir -p .sisyphus
-cp path/to/oh-my-handoff/session-handoff.md .sisyphus/
-```
-
-### 步骤 2: 安装 Plugin（Hook 层）
+插件启动时会**自动创建** `.sisyphus/session-handoff.md`，无需手动复制模板。
 
 ```bash
 cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
@@ -93,7 +86,26 @@ cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
 }
 ```
 
-### 步骤 3: 添加 AGENTS.md 行为规则
+### 步骤 2: 添加 AGENTS.md 行为规则
+
+```bash
+cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
+```
+
+编辑 `~/.config/opencode/opencode.jsonc`，在 `plugin` 数组中添加：
+
+```jsonc
+{
+  "plugin": [
+    "oh-my-openagent@latest",
+    "superpowers@git+https://github.com/obra/superpowers.git",
+    "@tarquinen/opencode-dcp@latest",
+    "file:///home/<你的用户名>/.config/opencode/plugins/session-handoff.ts"
+  ]
+}
+```
+
+### 步骤 2: 添加 AGENTS.md 行为规则
 
 将以下内容追加到项目 `AGENTS.md` 或 `~/.config/opencode/AGENTS.md` 末尾：
 
@@ -155,7 +167,7 @@ When session ends: set `status: sealed`, artifact remains for next session.
 
 完整内容参考 [`plans/2026-05-22-session-handoff.md`](plans/2026-05-22-session-handoff.md) 的 Task 2。
 
-### 步骤 4: 重启 OpenCode
+### 步骤 3: 重启 OpenCode
 
 ```bash
 # 关掉重开

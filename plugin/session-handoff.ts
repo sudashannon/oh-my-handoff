@@ -5,9 +5,69 @@ import { join } from "node:path"
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const PRESSURE_MARKER = ".sisyphus/context-pressure"
 
+const CLEAN_TEMPLATE = `---
+session_id: ""
+parent_session: ""
+model: ""
+created: ""
+status: active
+goal: ""
+tags: []
+handoff_count: 0
+---
+
+# Session Handoff
+
+## Decision Log
+
+| Time | Decision | Context | Alternatives | Rationale |
+|---|---|---|---|---|
+
+## Key Artifacts
+
+| File | Purpose | Status |
+|---|---|---|
+
+## Subagent Outputs (High-Value)
+
+| Agent | Task | Key Finding | Timestamp |
+|---|---|---|---|
+
+## Design Outputs
+
+| Skill | Output | Path |
+|---|---|---|
+
+## DCP Chapter Index
+
+| # | Range | Topic | Summary | DCP Summary |
+|---|---|---|---|---|
+
+## Current State
+
+- **Active Goal:**
+- **Blockers:**
+- **Todo Snapshot:**
+- **Open Questions:**
+
+## Next Steps
+
+`
+
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   const artifactPath = join(directory, ARTIFACT_NAME)
   const pressurePath = join(directory, PRESSURE_MARKER)
+
+  // Auto-create artifact on first load
+  try {
+    await mkdir(join(directory, ".sisyphus"), { recursive: true })
+    try {
+      await readFile(artifactPath, "utf-8")
+    } catch {
+      await writeFile(artifactPath, CLEAN_TEMPLATE)
+      console.log(`[session-handoff] Created ${ARTIFACT_NAME}`)
+    }
+  } catch {}
 
   async function appendTableRow(
     section: string,
