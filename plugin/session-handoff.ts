@@ -1,13 +1,48 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import { readFile, writeFile, appendFile, mkdir, stat } from "node:fs/promises"
+import { readFile, writeFile, appendFile, mkdir, stat, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 import { homedir } from "node:os"
 
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const PRESSURE_MARKER = ".sisyphus/context-pressure"
 const STATE_FILE = ".sisyphus/.plugin-state.json"
+const ARCHIVE_DIR = ".sisyphus/archive"
+const MAX_ARCHIVE = 20
 
-const CLEAN_TEMPLATE = (sid: string, parent: string, model: string, created: string, handoff: number) => `---
+const INHERITED_SECTIONS = [
+  "Decision Log",
+  "Key Artifacts",
+  "Subagent Outputs",
+  "Design Outputs",
+  "DCP Chapter Index",
+]
+
+const TABLE_HEADERS: Record<string, string> = {
+  "Decision Log": "| Time | Decision | Context | Alternatives | Rationale |",
+  "Key Artifacts": "| File | Purpose | Status |",
+  "Subagent Outputs": "| Agent | Task | Key Finding | Timestamp |",
+  "Design Outputs": "| Skill | Output | Path |",
+  "DCP Chapter Index": "| # | Range | Topic | Summary | DCP Summary |",
+}
+
+const TABLE_SEPARATORS: Record<string, string> = {
+  "Decision Log": "|---|---|---|---|---|",
+  "Key Artifacts": "|---|---|---|",
+  "Subagent Outputs": "|---|---|---|---|",
+  "Design Outputs": "|---|---|---|",
+  "DCP Chapter Index": "|---|---|---|---|---|",
+}
+
+function CLEAN_TEMPLATE(
+  sid: string, parent: string, model: string, created: string,
+  handoff: number, isHandoff: boolean,
+  inherited: Map<string, string>,
+) {
+  const rows = (section: string) =>
+    inherited.get(section) ||
+    `${TABLE_HEADERS[section]}\n${TABLE_SEPARATORS[section]}\n`
+
+  return `---
 session_id: "${sid}"
 parent_session: "${parent}"
 model: "${model}"
@@ -16,35 +51,26 @@ status: active
 goal: ""
 tags: []
 handoff_count: ${handoff}
+is_handoff: ${isHandoff}
 ---
 
 # Session Handoff
 
 ## Decision Log
 
-| Time | Decision | Context | Alternatives | Rationale |
-|---|---|---|---|---|
-
+${rows("Decision Log")}
 ## Key Artifacts
 
-| File | Purpose | Status |
-|---|---|---|
-
+${rows("Key Artifacts")}
 ## Subagent Outputs (High-Value)
 
-| Agent | Task | Key Finding | Timestamp |
-|---|---|---|---|
-
+${rows("Subagent Outputs")}
 ## Design Outputs
 
-| Skill | Output | Path |
-|---|---|---|
-
+${rows("Design Outputs")}
 ## DCP Chapter Index
 
-| # | Range | Topic | Summary | DCP Summary |
-|---|---|---|---|---|
-
+${rows("DCP Chapter Index")}
 ## Current State
 
 - **Active Goal:**
@@ -55,11 +81,13 @@ handoff_count: ${handoff}
 ## Next Steps
 
 `
+}
 
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   const artifactPath = join(directory, ARTIFACT_NAME)
   const pressurePath = join(directory, PRESSURE_MARKER)
   const statePath = join(directory, STATE_FILE)
+  const archiveDir = join(directory, ARCHIVE_DIR)
 
   let currentSession = ""
   let msgCount = 0
@@ -77,58 +105,118 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   }
 
   async function loadState(): Promise<PluginState> {
-    try {
-      return parseState(await readFile(statePath, "utf-8"))
-    } catch {
-      return { lastSession: "", handoffCount: 0 }
-    }
+    try { return parseState(await readFile(statePath, "utf-8")) }
+    catch { return { lastSession: "", handoffCount: 0 } }
   }
 
+  await mkdir(join(directory, ".sisyphus"), { recursive: true })
+  await mkdir(archiveDir, { recursive: true })
+
+  const state = await loadState()
+
+  const logPath = join(directory, ".sisyphus", ".plugin.log")
+  async function log(msg: string): Promise<void> {
+    try {
+      const ts = new Date().toISOString().replace("T", " ").slice(0, 19)
+      await appendFile(logPath, `[${ts}] ${msg}\n`)
+    } catch {}
+  }
+
+  console.log(`[session-handoff] loaded — ${state.lastSession ? `last: ${state.lastSession}` : "fresh workspace"}`)
+
   async function saveState(s: PluginState): Promise<void> {
-    await mkdir(join(directory, ".sisyphus"), { recursive: true })
     await writeFile(statePath, JSON.stringify(s, null, 2))
   }
 
-  async function readExistingArtifact(): Promise<{
-    exists: boolean
-    sessionId?: string
-    handoffCount?: number
-    status?: string
-  }> {
+  function extractSection(content: string, section: string): string {
+    const startMarker = `## ${section}`
+    const idx = content.indexOf(startMarker)
+    if (idx === -1) return ""
+
+    const rest = content.slice(idx + startMarker.length)
+    const nextSectionMatch = rest.match(/\n## /)
+    const endIdx = nextSectionMatch ? nextSectionMatch.index! : rest.length
+
+    return rest.slice(0, endIdx).trimStart()
+  }
+
+  async function archiveArtifact(oldSessionId: string): Promise<void> {
     try {
-      const content = await readFile(artifactPath, "utf-8")
-      const sidMatch = content.match(/^session_id:\s*"([^"]*)"/m)
-      const hcMatch = content.match(/^handoff_count:\s*(\d+)/m)
-      const stMatch = content.match(/^status:\s*(\w+)/m)
-      return {
-        exists: true,
-        sessionId: sidMatch?.[1] || undefined,
-        handoffCount: hcMatch ? parseInt(hcMatch[1], 10) : 0,
-        status: stMatch?.[1] || undefined,
+      const dest = join(archiveDir, `ses_${oldSessionId}.md`)
+      await writeFile(dest, await readFile(artifactPath, "utf-8"))
+      await log(`archived: ses_${oldSessionId}.md`)
+    } catch {}
+  }
+
+  async function cleanupArchive(): Promise<void> {
+    try {
+      const entries = await readdir(archiveDir)
+      const files = entries.filter(f => f.startsWith("ses_") && f.endsWith(".md"))
+      if (files.length <= MAX_ARCHIVE) return
+
+      const sorted = files.sort()
+      const toDelete = sorted.slice(0, files.length - MAX_ARCHIVE)
+      for (const f of toDelete) {
+        await unlink(join(archiveDir, f))
+        await log(`archive cleanup: removed ${f}`)
       }
-    } catch {
-      return { exists: false }
-    }
+    } catch {}
   }
 
   async function initArtifact(sessionID: string, model: string): Promise<void> {
     try {
-      const existing = await readExistingArtifact()
-      const parentSession = existing.exists ? existing.sessionId || "" : ""
-      const isNewHandoff = existing.exists && existing.sessionId && existing.sessionId !== sessionID
-      const handoffCount = existing.exists
-        ? (existing.handoffCount ?? 0) + (isNewHandoff ? 1 : 0)
-        : 0
+      const readExisting = async () => {
+        try {
+          const content = await readFile(artifactPath, "utf-8")
+          const sidMatch = content.match(/^session_id:\s*"([^"]*)"/m)
+          const hcMatch = content.match(/^handoff_count:\s*(\d+)/m)
+          return {
+            exists: true,
+            sessionId: sidMatch?.[1] || "",
+            handoffCount: hcMatch ? parseInt(hcMatch[1], 10) : 0,
+            content,
+          }
+        } catch { return { exists: false as const, sessionId: "", handoffCount: 0, content: "" } }
+      }
 
-      const created = new Date().toISOString()
-      const template = CLEAN_TEMPLATE(sessionID, parentSession, model, created, handoffCount)
+      const existing = await readExisting()
 
+      if (!existing.exists) {
+        const template = CLEAN_TEMPLATE(sessionID, "", model, new Date().toISOString(), 0, false, new Map())
+        await writeFile(artifactPath, template)
+        await saveState({ lastSession: sessionID, handoffCount: 0 })
+        await log(`artifact created: session=${sessionID} (first session in workspace)`)
+        return
+      }
+
+      if (existing.sessionId === sessionID) return
+
+      await archiveArtifact(existing.sessionId)
+
+      const inherited = new Map<string, string>()
+      for (const section of INHERITED_SECTIONS) {
+        const sec = extractSection(existing.content, section)
+        if (sec) inherited.set(section, sec.trim() + "\n\n")
+      }
+
+      const newHandoffCount = existing.handoffCount + 1
+      const isHandoff = existing.handoffCount > 0
+      const parentSession = existing.sessionId
+
+      const template = CLEAN_TEMPLATE(
+        sessionID, parentSession, model,
+        new Date().toISOString(), newHandoffCount, isHandoff,
+        inherited,
+      )
       await writeFile(artifactPath, template)
-      await saveState({ lastSession: sessionID, handoffCount })
+      await saveState({ lastSession: sessionID, handoffCount: newHandoffCount })
+
+      await cleanupArchive()
 
       await log(
-        `artifact init: session=${sessionID} ` +
-        `parent=${parentSession || "none"} model=${model} handoff_count=${handoffCount}`,
+        `artifact merge: session=${sessionID} parent=${parentSession} ` +
+        `handoff=${newHandoffCount} is_handoff=${isHandoff} ` +
+        `inherited=${inherited.size} sections`,
       )
     } catch (err) {
       console.warn(`[session-handoff] initArtifact failed:`, err)
@@ -160,23 +248,8 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       lines.splice(insertAt, 0, row)
       const newContent = content.slice(0, sectionIndex) + lines.join("\n")
       await writeFile(artifactPath, newContent)
-    } catch {
-      // All hooks must silently catch — a plugin crash kills the host process.
-    }
-  }
-
-  await mkdir(join(directory, ".sisyphus"), { recursive: true })
-  const state = await loadState()
-
-  const logPath = join(directory, ".sisyphus", ".plugin.log")
-  async function log(msg: string): Promise<void> {
-    try {
-      const ts = new Date().toISOString().replace("T", " ").slice(0, 19)
-      await appendFile(logPath, `[${ts}] ${msg}\n`)
     } catch {}
   }
-
-  console.log(`[session-handoff] loaded — ${state.lastSession ? `last: ${state.lastSession}` : "fresh session"}`)
 
   return {
     "chat.message": async (input, _output) => {

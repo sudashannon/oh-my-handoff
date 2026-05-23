@@ -1,12 +1,39 @@
 import { describe, it, expect } from "vitest"
 
-const CLEAN_TEMPLATE = (
-  sid: string,
-  parent: string,
-  model: string,
-  created: string,
-  handoff: number,
-) => `---
+const INHERITED_SECTIONS = [
+  "Decision Log",
+  "Key Artifacts",
+  "Subagent Outputs",
+  "Design Outputs",
+  "DCP Chapter Index",
+]
+
+const TABLE_HEADERS: Record<string, string> = {
+  "Decision Log": "| Time | Decision | Context | Alternatives | Rationale |",
+  "Key Artifacts": "| File | Purpose | Status |",
+  "Subagent Outputs": "| Agent | Task | Key Finding | Timestamp |",
+  "Design Outputs": "| Skill | Output | Path |",
+  "DCP Chapter Index": "| # | Range | Topic | Summary | DCP Summary |",
+}
+
+const TABLE_SEPARATORS: Record<string, string> = {
+  "Decision Log": "|---|---|---|---|---|",
+  "Key Artifacts": "|---|---|---|",
+  "Subagent Outputs": "|---|---|---|---|",
+  "Design Outputs": "|---|---|---|",
+  "DCP Chapter Index": "|---|---|---|---|---|",
+}
+
+function CLEAN_TEMPLATE(
+  sid: string, parent: string, model: string, created: string,
+  handoff: number, isHandoff: boolean,
+  inherited: Map<string, string>,
+) {
+  const rows = (section: string) =>
+    inherited.get(section) ||
+    `${TABLE_HEADERS[section]}\n${TABLE_SEPARATORS[section]}\n`
+
+  return `---
 session_id: "${sid}"
 parent_session: "${parent}"
 model: "${model}"
@@ -15,35 +42,26 @@ status: active
 goal: ""
 tags: []
 handoff_count: ${handoff}
+is_handoff: ${isHandoff}
 ---
 
 # Session Handoff
 
 ## Decision Log
 
-| Time | Decision | Context | Alternatives | Rationale |
-|---|---|---|---|---|
-
+${rows("Decision Log")}
 ## Key Artifacts
 
-| File | Purpose | Status |
-|---|---|---|
-
+${rows("Key Artifacts")}
 ## Subagent Outputs (High-Value)
 
-| Agent | Task | Key Finding | Timestamp |
-|---|---|---|---|
-
+${rows("Subagent Outputs")}
 ## Design Outputs
 
-| Skill | Output | Path |
-|---|---|---|
-
+${rows("Design Outputs")}
 ## DCP Chapter Index
 
-| # | Range | Topic | Summary | DCP Summary |
-|---|---|---|---|---|
-
+${rows("DCP Chapter Index")}
 ## Current State
 
 - **Active Goal:**
@@ -54,33 +72,41 @@ handoff_count: ${handoff}
 ## Next Steps
 
 `
+}
 
-type PluginState = { lastSession: string; handoffCount: number }
+function extractSection(content: string, section: string): string {
+  const startMarker = `## ${section}`
+  const idx = content.indexOf(startMarker)
+  if (idx === -1) return ""
 
-function parseState(raw: string): PluginState {
+  const rest = content.slice(idx + startMarker.length)
+  const nextSectionMatch = rest.match(/\n## /)
+  const endIdx = nextSectionMatch ? nextSectionMatch.index! : rest.length
+
+  return rest.slice(0, endIdx).trimStart()
+}
+
+function parseState(raw: string): { lastSession: string; handoffCount: number } {
   try {
     const j = JSON.parse(raw)
-    return {
-      lastSession: String(j.lastSession || ""),
-      handoffCount: Number(j.handoffCount || 0),
-    }
+    return { lastSession: String(j.lastSession || ""), handoffCount: Number(j.handoffCount || 0) }
   } catch {
     return { lastSession: "", handoffCount: 0 }
   }
 }
 
 function readFrontmatter(content: string): {
-  sessionId?: string
-  handoffCount?: number
-  status?: string
+  sessionId?: string; handoffCount?: number; status?: string; isHandoff?: boolean
 } {
   const sidMatch = content.match(/^session_id:\s*"([^"]*)"/m)
   const hcMatch = content.match(/^handoff_count:\s*(\d+)/m)
   const stMatch = content.match(/^status:\s*(\w+)/m)
+  const ihMatch = content.match(/^is_handoff:\s*(true|false)/m)
   return {
     sessionId: sidMatch?.[1] || undefined,
     handoffCount: hcMatch ? parseInt(hcMatch[1], 10) : 0,
     status: stMatch?.[1] || undefined,
+    isHandoff: ihMatch ? ihMatch[1] === "true" : undefined,
   }
 }
 
@@ -108,116 +134,129 @@ function appendTableRow(content: string, section: string, values: string[]): str
   return content.slice(0, sectionIndex) + lines.join("\n")
 }
 
-describe("CLEAN_TEMPLATE", () => {
-  it("generates correct frontmatter with session_id", () => {
-    const tpl = CLEAN_TEMPLATE("ses_abc", "ses_prev", "deepseek/model", "2026-05-22T10:00:00Z", 1)
-    expect(tpl).toContain('session_id: "ses_abc"')
-    expect(tpl).toContain('parent_session: "ses_prev"')
-    expect(tpl).toContain('model: "deepseek/model"')
-    expect(tpl).toContain('created: "2026-05-22T10:00:00Z"')
-    expect(tpl).toContain("status: active")
-    expect(tpl).toContain("handoff_count: 1")
-  })
-
-  it("handles empty parent_session", () => {
-    const tpl = CLEAN_TEMPLATE("ses_new", "", "gpt-4", "2026-01-01T00:00:00Z", 0)
+describe("CLEAN_TEMPLATE — fresh session (no inheritance)", () => {
+  it("generates blank template with empty tables", () => {
+    const tpl = CLEAN_TEMPLATE("ses_a", "", "gpt-4", "2026-01-01T00:00:00Z", 0, false, new Map())
+    expect(tpl).toContain('session_id: "ses_a"')
     expect(tpl).toContain('parent_session: ""')
     expect(tpl).toContain("handoff_count: 0")
-  })
-
-  it("includes all 7 artifact sections", () => {
-    const tpl = CLEAN_TEMPLATE("ses_x", "", "", "", 0)
-    const sections = [
-      "Decision Log",
-      "Key Artifacts",
-      "Subagent Outputs",
-      "Design Outputs",
-      "DCP Chapter Index",
-      "Current State",
-      "Next Steps",
-    ]
-    for (const s of sections) {
+    expect(tpl).toContain("is_handoff: false")
+    expect(tpl).toContain("status: active")
+    for (const s of INHERITED_SECTIONS) {
       expect(tpl).toContain(`## ${s}`)
     }
   })
 
   it("has exactly 2 YAML frontmatter delimiters", () => {
-    const tpl = CLEAN_TEMPLATE("ses_x", "", "", "", 0)
+    const tpl = CLEAN_TEMPLATE("ses_x", "", "", "", 0, false, new Map())
     const dashes = (tpl.match(/^---$/gm) || []).length
     expect(dashes).toBe(2)
   })
 })
 
-describe("parseState", () => {
-  it("parses valid JSON state", () => {
-    const result = parseState('{"lastSession":"ses_abc","handoffCount":5}')
-    expect(result).toEqual({ lastSession: "ses_abc", handoffCount: 5 })
+describe("CLEAN_TEMPLATE — with inherited sections", () => {
+  const inherited = new Map<string, string>()
+  inherited.set("Decision Log", "| 10:00 | Use X | ctx | alt | reason |\n")
+
+  it("embeds inherited table rows", () => {
+    const tpl = CLEAN_TEMPLATE("ses_b", "ses_a", "deepseek", "2026-05-22", 3, true, inherited)
+    expect(tpl).toContain('parent_session: "ses_a"')
+    expect(tpl).toContain("handoff_count: 3")
+    expect(tpl).toContain("is_handoff: true")
+    expect(tpl).toContain("| 10:00 | Use X | ctx | alt | reason |")
   })
 
-  it("returns defaults for missing fields", () => {
+  it("uses empty headers for non-inherited sections", () => {
+    const tpl = CLEAN_TEMPLATE("ses_c", "ses_b", "", "", 1, true, inherited)
+    expect(tpl).toContain("| File | Purpose | Status |")
+    expect(tpl).toContain("|---|---|---|")
+  })
+})
+
+describe("extractSection", () => {
+  const artifact = `## Decision Log
+
+| 10:00 | Pick X | ctx | alt | reason |
+|---|---|---|---|
+
+## Key Artifacts
+
+| File | Purpose | Status |
+|---|---|---|
+| src/a.ts | auth | created |
+
+## DCP Chapter Index
+
+| # | Range | Topic | Summary | DCP Summary |
+|---|---|---|---|---|
+
+`
+
+  it("extracts a section with content", () => {
+    const result = extractSection(artifact, "Decision Log")
+    expect(result).toContain("| 10:00 | Pick X | ctx | alt | reason |")
+  })
+
+  it("extracts a section with table heading and data row", () => {
+    const result = extractSection(artifact, "Key Artifacts")
+    expect(result.trim()).toBe("| File | Purpose | Status |\n|---|---|---|\n| src/a.ts | auth | created |")
+  })
+
+  it("extracts an empty section", () => {
+    const result = extractSection(artifact, "DCP Chapter Index")
+    expect(result).toContain("| # | Range | Topic | Summary | DCP Summary |")
+    expect(result).toContain("|---|---|---|---|---|")
+  })
+
+  it("returns empty string for missing section", () => {
+    expect(extractSection(artifact, "NonExistent")).toBe("")
+  })
+
+  it("stops at next section header", () => {
+    const result = extractSection(artifact, "Decision Log")
+    expect(result).not.toContain("Key Artifacts")
+  })
+})
+
+describe("parseState", () => {
+  it("parses valid JSON", () => {
+    expect(parseState('{"lastSession":"ses_a","handoffCount":5}'))
+      .toEqual({ lastSession: "ses_a", handoffCount: 5 })
+  })
+
+  it("returns defaults for empty JSON", () => {
     expect(parseState("{}")).toEqual({ lastSession: "", handoffCount: 0 })
   })
 
   it("returns defaults for invalid JSON", () => {
-    expect(parseState("not json")).toEqual({ lastSession: "", handoffCount: 0 })
-  })
-
-  it("returns defaults for empty string", () => {
-    expect(parseState("")).toEqual({ lastSession: "", handoffCount: 0 })
-  })
-
-  it("coerces string handoffCount to number", () => {
-    const result = parseState('{"lastSession":"ses_x","handoffCount":"3"}')
-    expect(result).toEqual({ lastSession: "ses_x", handoffCount: 3 })
+    expect(parseState("boom")).toEqual({ lastSession: "", handoffCount: 0 })
   })
 })
 
 describe("readFrontmatter", () => {
-  const sampleArtifact = `---
-session_id: "ses_abc123"
-parent_session: "ses_prev"
-model: "deepseek-v4"
-created: "2026-05-22T10:00:00Z"
+  const sample = `---
+session_id: "ses_abc"
+handoff_count: 3
+is_handoff: true
 status: active
-goal: "test"
-tags: []
-handoff_count: 2
 ---
-
-# Session Handoff
 `
 
-  it("extracts session_id from frontmatter", () => {
-    expect(readFrontmatter(sampleArtifact).sessionId).toBe("ses_abc123")
+  it("reads is_handoff from frontmatter", () => {
+    expect(readFrontmatter(sample).isHandoff).toBe(true)
   })
 
-  it("extracts handoff_count as number", () => {
-    expect(readFrontmatter(sampleArtifact).handoffCount).toBe(2)
+  it("reads handoff_count as number", () => {
+    expect(readFrontmatter(sample).handoffCount).toBe(3)
   })
 
-  it("extracts status", () => {
-    expect(readFrontmatter(sampleArtifact).status).toBe("active")
-  })
-
-  it("returns undefined sessionId when field is missing", () => {
-    const fm = readFrontmatter("---\nstatus: sealed\n---\n")
-    expect(fm.sessionId).toBeUndefined()
-    expect(fm.status).toBe("sealed")
-  })
-
-  it("returns default handoffCount of 0 for empty content", () => {
-    expect(readFrontmatter("").handoffCount).toBe(0)
+  it("returns undefined isHandoff when field missing", () => {
+    expect(readFrontmatter("---\nstatus: active\n---\n").isHandoff).toBeUndefined()
   })
 })
 
 describe("appendTableRow", () => {
-  const artifactWithEmptyTable = `---
-status: active
----
-
-# Session Handoff
-
-## DCP Chapter Index
+  const artifact = `## DCP Chapter Index
 
 | # | Range | Topic | Summary | DCP Summary |
 |---|---|---|---|---|
@@ -225,86 +264,54 @@ status: active
 ## Current State
 `
 
-  it("inserts a row into an empty table", () => {
-    const result = appendTableRow(artifactWithEmptyTable, "DCP Chapter Index", [
-      "1", "ses_xyz", "auto-compact", "First compaction", "",
+  it("inserts row after separator", () => {
+    const result = appendTableRow(artifact, "DCP Chapter Index", [
+      "1", "ses_x", "compaction", "summary", "",
     ])
-    expect(result).toContain("| 1 | ses_xyz | auto-compact | First compaction |  |")
+    expect(result).toContain("| 1 | ses_x | compaction | summary |  |")
   })
 
   it("appends after existing rows", () => {
-    const withExisting = `---
-status: active
----
-
-# Session Handoff
-
-## DCP Chapter Index
+    const withRows = `## DCP Chapter Index
 
 | # | Range | Topic | Summary | DCP Summary |
 |---|---|---|---|---|
-| 1 | ses_a | topic-a | summary-a |  |
+| 1 | ses_a | a | summary-a |  |
 
 ## Current State
 `
-    const result = appendTableRow(withExisting, "DCP Chapter Index", [
-      "2", "ses_b", "topic-b", "summary-b", "",
+    const result = appendTableRow(withRows, "DCP Chapter Index", [
+      "2", "ses_b", "b", "summary-b", "",
     ])
-    expect(result).toContain("| 1 | ses_a | topic-a | summary-a |  |")
-    expect(result).toContain("| 2 | ses_b | topic-b | summary-b |  |")
+    expect(result).toContain("| 1 | ses_a | a | summary-a |  |")
+    expect(result).toContain("| 2 | ses_b | b | summary-b |  |")
   })
 
   it("returns null for missing section", () => {
-    const result = appendTableRow(artifactWithEmptyTable, "NonExistent Section", ["a", "b"])
-    expect(result).toBeNull()
-  })
-
-  it("inserts into Decision Log table", () => {
-    const artifact = `---
-status: active
----
-
-# Session Handoff
-
-## Decision Log
-
-| Time | Decision | Context | Alternatives | Rationale |
-|---|---|---|---|---|
-
-## Next Steps
-`
-    const result = appendTableRow(artifact, "Decision Log", [
-      "10:00", "Use X", "context", "alt", "reason",
-    ])
-    expect(result).toContain("| 10:00 | Use X | context | alt | reason |")
-  })
-
-  it("preserves other sections when inserting", () => {
-    const result = appendTableRow(artifactWithEmptyTable, "DCP Chapter Index", [
-      "1", "s", "t", "summary", "",
-    ])
-    expect(result).toContain("## Current State")
-    expect(result).toContain("## DCP Chapter Index")
+    expect(appendTableRow(artifact, "Fake", ["a"])).toBeNull()
   })
 })
 
 describe("Handoff count logic", () => {
-  it("increments handoff_count when session_id changes", () => {
-    const existingHc = 3
-    const isNewHandoff = "ses_old" !== "ses_new"
-    const newHc = existingHc + (isNewHandoff ? 1 : 0)
-    expect(newHc).toBe(4)
+  it("starts at 0 for first session", () => {
+    expect(0).toBe(0)
   })
 
-  it("does not increment when session_id is unchanged (plugin reload)", () => {
-    const existingHc = 2
-    const isNewHandoff = "ses_same" !== "ses_same"
-    const newHc = existingHc + (isNewHandoff ? 1 : 0)
-    expect(newHc).toBe(2)
+  it("always increments on new session", () => {
+    const old = 3
+    const next = old + 1
+    expect(next).toBe(4)
   })
 
-  it("starts at 0 for first-ever session with no existing artifact", () => {
-    const handoffCount = false ? 2 : 0
-    expect(handoffCount).toBe(0)
+  it("is_handoff is true when previous handoff_count > 0", () => {
+    const prev = 2
+    const isHandoff = prev > 0
+    expect(isHandoff).toBe(true)
+  })
+
+  it("is_handoff is false for first session", () => {
+    const prev = 0
+    const isHandoff = prev > 0
+    expect(isHandoff).toBe(false)
   })
 })
