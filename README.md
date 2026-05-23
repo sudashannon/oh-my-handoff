@@ -65,28 +65,9 @@ handoff_count: 3        # 第几次 handoff
 - [OpenCode](https://opencode.ai) >= 1.15.6
 - OpenCode DCP plugin（`@tarquinen/opencode-dcp@latest`）— 用于自动压缩
 
-### 步骤 1: 安装 Plugin（Hook 层）— 同时完成步骤 1 和 2
+### 步骤 1: 安装 Plugin（Hook 层）
 
 插件启动时会**自动创建** `.sisyphus/session-handoff.md`，无需手动复制模板。
-
-```bash
-cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
-```
-
-编辑 `~/.config/opencode/opencode.jsonc`，在 `plugin` 数组中添加：
-
-```jsonc
-{
-  "plugin": [
-    "oh-my-openagent@latest",
-    "superpowers@git+https://github.com/obra/superpowers.git",
-    "@tarquinen/opencode-dcp@latest",
-    "file:///home/<你的用户名>/.config/opencode/plugins/session-handoff.ts"
-  ]
-}
-```
-
-### 步骤 2: 添加 AGENTS.md 行为规则
 
 ```bash
 cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
