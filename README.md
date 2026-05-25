@@ -226,13 +226,15 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 oh-my-handoff/
 ├── README.md                          ← 本文件
 ├── LICENSE                            ← MIT
-├── session-handoff.md                 ← Artifact 模板（复制到 .sisyphus/ 使用）
+├── plugin/
+│   ├── session-handoff.ts             ← OpenCode Plugin（Hook 层实现）
+│   └── __tests__/                     ← Vitest 单元测试
+├── examples/
+│   └── handoff-example.md             ← 真实 handoff artifact 示例（仅参考，运行时由插件自动生成）
 ├── specs/
 │   └── session-handoff-design.md      ← 完整设计文档
-├── plans/
-│   └── 2026-05-22-session-handoff.md  ← 实现计划（6 个 Task）
-└── plugin/
-    └── session-handoff.ts             ← OpenCode Plugin（Hook 层实现）
+└── plans/
+    └── 2026-05-22-session-handoff.md  ← 实现计划（6 个 Task）
 ```
 
 ---
