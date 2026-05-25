@@ -303,15 +303,16 @@ describe("Handoff count logic", () => {
     expect(next).toBe(4)
   })
 
-  it("is_handoff is true when previous handoff_count > 0", () => {
-    const prev = 2
-    const isHandoff = prev > 0
+  it("is_handoff is true whenever a previous session is archived", () => {
+    const previousArtifactExisted = true
+    const sameSession = false
+    const isHandoff = previousArtifactExisted && !sameSession
     expect(isHandoff).toBe(true)
   })
 
-  it("is_handoff is false for first session", () => {
-    const prev = 0
-    const isHandoff = prev > 0
+  it("is_handoff is false only when no previous artifact exists", () => {
+    const previousArtifactExisted = false
+    const isHandoff = previousArtifactExisted
     expect(isHandoff).toBe(false)
   })
 })

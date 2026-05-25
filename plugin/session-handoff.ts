@@ -200,7 +200,9 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       }
 
       const newHandoffCount = existing.handoffCount + 1
-      const isHandoff = existing.handoffCount > 0
+      // We only reach this branch after passing both early returns (no artifact / same session),
+      // so by definition we are archiving a previous session — this IS a handoff.
+      const isHandoff = true
       const parentSession = existing.sessionId
 
       const template = CLEAN_TEMPLATE(
