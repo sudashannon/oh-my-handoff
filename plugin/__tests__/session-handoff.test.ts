@@ -10,6 +10,14 @@ import {
   appendTableRow,
 } from "../lib/parse"
 import { writeFileAtomic } from "../lib/io"
+import {
+  readLock,
+  writeLock,
+  isProcessAlive,
+  isLockStale,
+  isLockHeldByOther,
+  STALE_LOCK_MS,
+} from "../lib/lock"
 
 describe("CLEAN_TEMPLATE — fresh session (no inheritance)", () => {
   it("generates blank template with empty tables", () => {
@@ -241,5 +249,97 @@ describe("writeFileAtomic", () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe("lock helpers", () => {
+  it("readLock returns null when file is missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"))
+    try {
+      expect(await readLock(join(dir, "missing"))).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("readLock returns null on malformed JSON", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"))
+    try {
+      const path = join(dir, "lock")
+      await writeFile(path, "not json")
+      expect(await readLock(path)).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("readLock returns null when fields are wrong types", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"))
+    try {
+      const path = join(dir, "lock")
+      await writeFile(path, JSON.stringify({ sessionId: 1, pid: "x", createdAt: "y" }))
+      expect(await readLock(path)).toBeNull()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("writeLock + readLock round-trips a LockInfo", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"))
+    try {
+      const path = join(dir, "lock")
+      const info = { sessionId: "ses_a", pid: 999, createdAt: 1000 }
+      await writeLock(path, info)
+      expect(await readLock(path)).toEqual(info)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("isProcessAlive(self) is true", () => {
+    expect(isProcessAlive(process.pid)).toBe(true)
+  })
+
+  it("isProcessAlive(0) is false", () => {
+    expect(isProcessAlive(0)).toBe(false)
+  })
+
+  it("isLockStale: fresh lock is not stale", () => {
+    const now = Date.now()
+    expect(isLockStale({ sessionId: "x", pid: 1, createdAt: now }, now)).toBe(false)
+  })
+
+  it("isLockStale: lock older than STALE_LOCK_MS is stale", () => {
+    const now = Date.now()
+    expect(isLockStale({ sessionId: "x", pid: 1, createdAt: now - STALE_LOCK_MS - 1 }, now)).toBe(true)
+  })
+
+  it("isLockHeldByOther: null lock means not held", () => {
+    expect(isLockHeldByOther(null, "ses_a", 100)).toBe(false)
+  })
+
+  it("isLockHeldByOther: same session is not 'other'", () => {
+    const info = { sessionId: "ses_a", pid: 999999, createdAt: Date.now() }
+    expect(isLockHeldByOther(info, "ses_a", 100)).toBe(false)
+  })
+
+  it("isLockHeldByOther: same pid is not 'other'", () => {
+    const info = { sessionId: "ses_x", pid: process.pid, createdAt: Date.now() }
+    expect(isLockHeldByOther(info, "ses_a", process.pid)).toBe(false)
+  })
+
+  it("isLockHeldByOther: stale lock is not held", () => {
+    const info = { sessionId: "ses_x", pid: process.pid, createdAt: Date.now() - STALE_LOCK_MS - 1 }
+    expect(isLockHeldByOther(info, "ses_a", 100)).toBe(false)
+  })
+
+  it("isLockHeldByOther: live different session does hold the lock", () => {
+    const info = { sessionId: "ses_x", pid: process.pid, createdAt: Date.now() }
+    expect(isLockHeldByOther(info, "ses_a", 100)).toBe(true)
+  })
+
+  it("isLockHeldByOther: dead foreign session does not hold the lock", () => {
+    const info = { sessionId: "ses_x", pid: 0, createdAt: Date.now() }
+    expect(isLockHeldByOther(info, "ses_a", 100)).toBe(false)
   })
 })

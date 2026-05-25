@@ -9,16 +9,19 @@ import {
   appendTableRow as appendTableRowPure,
 } from "./lib/parse"
 import { writeFileAtomic } from "./lib/io"
+import { readLock, writeLock, isLockHeldByOther } from "./lib/lock"
 
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const STATE_FILE = ".sisyphus/.plugin-state.json"
 const ARCHIVE_DIR = ".sisyphus/archive"
 const MAX_ARCHIVE = 20
+const LOCK_FILE = ".sisyphus/.session-lock"
 
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   const artifactPath = join(directory, ARTIFACT_NAME)
   const statePath = join(directory, STATE_FILE)
   const archiveDir = join(directory, ARCHIVE_DIR)
+  const lockPath = join(directory, LOCK_FILE)
 
   let currentSession = ""
   let msgCount = 0
@@ -98,11 +101,21 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         const template = CLEAN_TEMPLATE(sessionID, "", model, new Date().toISOString(), 0, false, new Map())
         await writeFileAtomic(artifactPath, template)
         await saveState({ lastSession: sessionID, handoffCount: 0 })
+        await writeLock(lockPath, { sessionId: sessionID, pid: process.pid, createdAt: Date.now() })
         await log(`artifact created: session=${sessionID} (first session in workspace)`)
         return
       }
 
       if (existing.sessionId === sessionID) return
+
+      const lock = await readLock(lockPath)
+      if (isLockHeldByOther(lock, sessionID, process.pid)) {
+        await log(
+          `lock held by live session pid=${lock!.pid} sid=${lock!.sessionId} — standing down, ` +
+          `not archiving artifact for ${existing.sessionId}`,
+        )
+        return
+      }
 
       await archiveArtifact(existing.sessionId)
 
@@ -125,6 +138,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       )
       await writeFileAtomic(artifactPath, template)
       await saveState({ lastSession: sessionID, handoffCount: newHandoffCount })
+      await writeLock(lockPath, { sessionId: sessionID, pid: process.pid, createdAt: Date.now() })
 
       await cleanupArchive()
 
