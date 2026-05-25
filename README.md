@@ -69,8 +69,11 @@ handoff_count: 3        # 第几次 handoff
 
 插件启动时会**自动创建** `.sisyphus/session-handoff.md`，无需手动复制模板。
 
+> ⚠️ 新版本插件采用模块化结构，`session-handoff.ts` 依赖 `lib/` 下的 4 个辅助文件（template/parse/io/lock），必须复制整个 `plugin/` 目录。
+
 ```bash
-cp path/to/oh-my-handoff/plugin/session-handoff.ts ~/.config/opencode/plugins/
+cp -r path/to/oh-my-handoff/plugin ~/.config/opencode/plugins/
+# 结果: ~/.config/opencode/plugins/session-handoff.ts + lib/{template,parse,io,lock}.ts
 ```
 
 编辑 `~/.config/opencode/opencode.jsonc`，在 `plugin` 数组中添加：
