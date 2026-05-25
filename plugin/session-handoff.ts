@@ -8,6 +8,7 @@ import {
   extractSection,
   appendTableRow as appendTableRowPure,
 } from "./lib/parse"
+import { writeFileAtomic } from "./lib/io"
 
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const STATE_FILE = ".sisyphus/.plugin-state.json"
@@ -44,7 +45,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   console.log(`[session-handoff] loaded — ${state.lastSession ? `last: ${state.lastSession}` : "fresh workspace"}`)
 
   async function saveState(s: PluginState): Promise<void> {
-    await writeFile(statePath, JSON.stringify(s, null, 2))
+    await writeFileAtomic(statePath, JSON.stringify(s, null, 2))
   }
 
   async function archiveArtifact(oldSessionId: string): Promise<void> {
@@ -95,7 +96,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
 
       if (!existing.exists) {
         const template = CLEAN_TEMPLATE(sessionID, "", model, new Date().toISOString(), 0, false, new Map())
-        await writeFile(artifactPath, template)
+        await writeFileAtomic(artifactPath, template)
         await saveState({ lastSession: sessionID, handoffCount: 0 })
         await log(`artifact created: session=${sessionID} (first session in workspace)`)
         return
@@ -122,7 +123,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         new Date().toISOString(), newHandoffCount, isHandoff,
         inherited,
       )
-      await writeFile(artifactPath, template)
+      await writeFileAtomic(artifactPath, template)
       await saveState({ lastSession: sessionID, handoffCount: newHandoffCount })
 
       await cleanupArchive()
@@ -142,7 +143,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       const content = await readFile(artifactPath, "utf-8")
       const newContent = appendTableRowPure(content, section, values)
       if (newContent === null) return
-      await writeFile(artifactPath, newContent)
+      await writeFileAtomic(artifactPath, newContent)
     } catch {}
   }
 
@@ -167,7 +168,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         msgCount++
 
         const counterFile = join(directory, ".sisyphus", ".msg-counter")
-        await writeFile(counterFile, String(msgCount))
+        await writeFileAtomic(counterFile, String(msgCount))
 
         if (msgCount <= 3 || msgCount % 50 === 0) {
           await log(`msg #${msgCount} session=${sid}`)
@@ -180,7 +181,7 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         compactionCount++
 
         const compCounterFile = join(directory, ".sisyphus", ".compaction-counter")
-        await writeFile(compCounterFile, String(compactionCount))
+        await writeFileAtomic(compCounterFile, String(compactionCount))
 
         const now = new Date().toISOString().replace("T", " ").slice(0, 19)
         await appendTableRow("DCP Chapter Index", [

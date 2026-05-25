@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest"
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { INHERITED_SECTIONS, CLEAN_TEMPLATE } from "../lib/template"
 import {
   extractSection,
@@ -6,6 +9,7 @@ import {
   readFrontmatter,
   appendTableRow,
 } from "../lib/parse"
+import { writeFileAtomic } from "../lib/io"
 
 describe("CLEAN_TEMPLATE — fresh session (no inheritance)", () => {
   it("generates blank template with empty tables", () => {
@@ -187,5 +191,55 @@ describe("Handoff count logic", () => {
     const previousArtifactExisted = false
     const isHandoff = previousArtifactExisted
     expect(isHandoff).toBe(false)
+  })
+})
+
+describe("writeFileAtomic", () => {
+  it("writes content to the target path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wfa-"))
+    try {
+      const target = join(dir, "out.txt")
+      await writeFileAtomic(target, "hello")
+      expect(await readFile(target, "utf-8")).toBe("hello")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("overwrites an existing file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wfa-"))
+    try {
+      const target = join(dir, "out.txt")
+      await writeFile(target, "old")
+      await writeFileAtomic(target, "new")
+      expect(await readFile(target, "utf-8")).toBe("new")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("leaves no .tmp.* siblings after a successful write", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wfa-"))
+    try {
+      const target = join(dir, "out.txt")
+      await writeFileAtomic(target, "x")
+      const entries = await readdir(dir)
+      expect(entries.filter((e) => e.includes(".tmp."))).toEqual([])
+      expect(entries).toContain("out.txt")
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("cleans up the .tmp.* file when the rename target dir is missing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wfa-"))
+    try {
+      const target = join(dir, "missing-subdir", "out.txt")
+      await expect(writeFileAtomic(target, "x")).rejects.toBeTruthy()
+      const entries = await readdir(dir)
+      expect(entries.filter((e) => e.includes(".tmp."))).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
