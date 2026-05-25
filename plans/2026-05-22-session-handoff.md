@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement auto+manual session handoff system with DCP Chapter Index, structured artifact, and AGENTS.md behavior rules.
+**Goal:** Implement session handoff system with DCP Chapter Index, structured artifact, and AGENTS.md behavior rules. Session context transfer is triggered **only** by manual commands (`/handoff-seal` and `/new-with-history`); no agent auto-triggered handoff.
 
 **Architecture:** Two changes: (1) Create `.sisyphus/session-handoff.md` template + directory structure (2) Add `<session_handoff>` behavior section to AGENTS.md defining maintenance rules, trigger conditions, handoff flow, and new-session bootstrap. DCP Chapter Index is handled via agent behavioral rules (agent invokes compress → records summary), not via plugin modification.
 
@@ -119,10 +119,6 @@ Insert at end of `AGENTS.md` (before EOF):
 <!-- SESSION_HANDOFF_START -->
 ## Session Handoff System
 
-<session_handoff_config>
-handoff_frequency: medium   # high | medium | low
-</session_handoff_config>
-
 ### Artifact
 
 Path: `{workspace}/.sisyphus/session-handoff.md`
@@ -136,7 +132,7 @@ The agent MUST update the artifact when:
 1. **Decision made** → Append row to `Decision Log`:
    `| timestamp | decision | context | alternatives | rationale |`
 2. **Key file created/modified** → Update `Key Artifacts`:
-   `| path | purpose | created|modified |`
+   `| path | purpose | created | modified |`
 3. **High-value subagent completes** → Extract findings to `Subagent Outputs`:
    - High-value agents: `oracle`, `explore`, `brainstorming`, `deep`, `ultrabrain`
    - Only record when output contains non-obvious findings
@@ -148,64 +144,23 @@ The agent MUST update the artifact when:
    The `dcp_summary` column contains whatever summary text the agent generates as part of compress.
 6. **todowrite changes** → Sync current todo state to `Current State` > `Todo Snapshot`.
 
-### Handoff Trigger Conditions
-
-The agent MUST check after each response whether a trigger condition is met:
-
-| Level | Auto Trigger | Manual Trigger |
-|---|---|---|
-| high | 30 messages OR 1 DCP compression | User `/handoff` anytime |
-| medium (default) | 50 messages OR 2 DCP compressions | User `/handoff` anytime |
-| low | 80 messages OR 3 DCP compressions | User `/handoff` anytime |
-
-Additional auto triggers:
-- **Topic switch**: if the current goal diverges significantly from `goal` in artifact frontmatter, suggest handoff even before message threshold.
-- **Compression frequency**: if last 5 tool calls include 2+ compress calls, context is too挤 — suggest handoff.
-
-### Handoff Flow
-
-When a trigger condition is met:
-
-```
-Agent detects trigger →
-  "Session has reached N messages. Recommend handoff to keep context fresh.
-   Continue current session, or handoff to a new session?"
-
-User confirms →
-  1. Agent does FINAL REFRESH of all artifact sections
-  2. Set frontmatter `status: sealed`, increment `handoff_count`
-  3. Output: "Handoff ready. Run `opencode` to start fresh session.
-     The artifact at `.sisyphus/session-handoff.md` will be loaded automatically."
-
-User rejects →
-  1. Continue current session
-  2. Check again on next trigger
-```
-
 ### New Session Bootstrap
 
-When a new session starts, the agent MUST:
+Artifact status determines what the new session inherits:
 
-1. Check if `.sisyphus/session-handoff.md` exists in the workspace
-2. If YES: Read the file completely
-   - Extract `parent_session` to understand lineage
-   - Read `Decision Log` to know history
-   - Read `Key Artifacts` to know critical files
-   - Read `DCP Chapter Index` for compressed history
-   - Read `Current State` for todo/blocker status
-   - Read `Next Steps` for direction
-   - **Important**: The agent should acknowledge the handoff to the user:
-     "Restored context from previous session [id]. Continuing with [goal]."
-3. If NO: Treat as fresh session (no restoration needed)
+| Artifact status | What happened | Plugin behavior |
+|---|---|---|
+| no artifact | First session in workspace | Creates blank artifact |
+| `status: sealed` | Previous session sealed by `/handoff-seal` or `/new-with-history` | Archives old artifact, creates new one with inherited sections |
+| `status: active` | Previous session was `/new` or ended normally | Archives old artifact, creates **blank** artifact (no inheritance) |
+
+When the artifact exists, the agent MUST read all sections and acknowledge to the user.
+
+When resuming a previously-seen sessionID (known-sessions), the plugin skips artifact operations — the artifact was already populated for this session.
 
 ### Session End
 
-When a session ends (user closes or exits):
-
-1. Agent does FINAL REFRESH of all artifact sections
-2. Set `status: sealed`
-3. Artifact remains in workspace for next session's bootstrap
-
+No automatic action. User manually invokes `/handoff-seal` or `/new-with-history` to seal the artifact and prepare for context inheritance in the next session.
 <!-- SESSION_HANDOFF_END -->
 ```
 

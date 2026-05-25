@@ -121,28 +121,39 @@ DCP 每次压缩执行后，自动写入一条索引 + 摘要。
 
 ---
 
-## 3. 触发条件 (可配置)
+## 3. 触发方式
 
-### 三级触发
+上下文传递完全由用户手动触发。无自动触发。
 
-```
-频率级别   自动触发条件                   手动触发
-──────────────────────────────────────────────────
-high       每 30 条消息 或 DCP 压缩 1 次   用户随时 /handoff
-medium     每 50 条消息 或 DCP 压缩 2 次   用户随时 /handoff  + topic 切换
-low        每 80 条消息 或 DCP 压缩 3 次   仅用户主动 /handoff
-```
+### 两条手动命令
 
-配置方式: AGENTS.md 中添加 `handoff_frequency: medium`
+| 命令 | 效果 | 适用场景 |
+|---|---|---|
+| `/handoff-seal` | 密封 artifact，agent 输出 handoff 引导信息 | 准备结束当前 session，下个 session 继承 |
+| `/new-with-history` | 密封 artifact，引导用户用 `/new` | 想在当前 session 继续工作，但先创建继承 session |
 
-### 自动触发具体条件
+两个命令执行相同的底层操作：agent 填充 `goal`、刷新所有 sections、设 `status: sealed`。区别仅在于给用户的回复内容不同。
 
-任一满足即提示:
+### Plugin 层的行为匹配
 
-1. **消息数阈值** — 超过设定值
-2. **DCP 压缩频率** — 短时间内多次触发压缩（说明 context 太挤）
-3. **DCP 压缩次数累计** — 累计压缩 N 次后
-4. **Topic 切换** — agent 检测到目标与之前明显不同
+新 session 启动时 `initArtifact` 检查旧 artifact 的 `status`：
+
+| status | 意思 | plugin 行为 |
+|---|---|---|
+| 不存在 | 首次使用 | 创建空白 artifact |
+| `active` | 普通 `/new` 或上次 session 未密封 | 存档旧 artifact → 空白冷启动 |
+| `sealed` | 用户手动运行了密封命令 | 存档旧 artifact → 继承上下文 |
+
+### Known Sessions (防重复存档)
+
+Plugin 自动记录所有见过的 sessionID 到 `.sisyphus/.known-sessions`：
+
+| 场景 | 行为 |
+|---|---|
+| **新 sessionID + sealed** | 存档旧 artifact + 创建继承 artifact |
+| **新 sessionID + active** | 存档旧 artifact + 创建空白 artifact |
+| **已知 sessionID（切换回来）** | 跳过所有 artifact 操作，直接继续 |
+| **并发 session（另一个进程持有锁）** | 创建独立 artifact，不碰主文件 |
 
 ---
 
@@ -175,37 +186,39 @@ Agent 每次执行关键操作后:
   └── todowrite 变化 → 同步到 Todo Snapshot
 ```
 
-### Handoff 触发
+### Handoff 触发 (手动命令)
+
+上下文传递只通过两条手动命令触发：
 
 ```
-Agent 检测到触发条件:
-  ├── 提示用户: "当前 session 已达 N 条消息 (配置阈值 M)，建议 handoff"
-  ├── 用户确认:
-  │   ├── Agent 执行最终刷新 artifact
-  │   │   ├── 更新所有字段为最新状态
-  │   │   ├── 将 status 改为 sealed
-  │   │   └── 将 handoff_count 加 1
-  │   ├── Agent 输出 handoff 命令:
-  │   │   ```
-  │   │   /clear 然后:
-  │   │   opencode --session new
-  │   │   ```
-  │   └── 用户在新 session 中:
-  │       ├── Agent 自动检测到 artifact
-  │       ├── 读取全部状态
-  │       └── 继续工作，零冷启动
-  └── 用户拒绝:
-      ├── Agent 继续当前 session
-      └── 等下次触发条件
+用户随时执行 /handoff-seal 或 /new-with-history:
+  ├── Agent 执行最终刷新 artifact
+  │   ├── 填充 goal 字段
+  │   ├── 更新所有 sections 为最新状态
+  │   └── 将 status 从 active 改为 sealed
+  ├── Agent 输出回复:
+  │   ├── /handoff-seal → "Handoff ready. Start a fresh OpenCode session..."
+  │   └── /new-with-history → "Artifact sealed. Type /new to start a fresh session..."
+  └── 用户按引导操作:
+      ├── 新 session 启动
+      ├── Plugin 检测到 artifact status=sealed
+      ├── Plugin 存档旧 artifact + 创建继承新 artifact
+      ├── Agent 检测到 artifact 存在
+      ├── Agent 读取全部状态
+      └── 继续工作，零冷启动
 ```
+
+Agent 不会主动检测或建议 handoff。只有用户觉得"上下文需要传递到下个 session"时，才执行手动命令。
 
 ### Session 封存
 
+不自动封存。用户需要跨 session 传递时才手动执行密封命令。
+
 ```
-用户主动关闭 session 时:
-  ├── Agent 刷新 artifact 所有字段
-  ├── status → sealed
-  └── artifact 保留在工作目录，供后续 session 读取
+Session 结束时:
+  └── artifact 保留为 active 状态
+      ├── 下次 /new → 冷启动（不继承）
+      └── 下次手动命令密封 + 新 session → 继承
 ```
 
 ---
@@ -216,8 +229,7 @@ Agent 检测到触发条件:
 |---|---|
 | **当前 session 的保活者** | 正常压缩旧消息，让 session 跑更久 |
 | **Chapter Index 的输入源** | 每次 compress 调用 → 提取主题和摘要写入 artifact |
-| **Handoff 触发器的信号源** | compress 频率过高 → 触发 handoff 建议 |
-| **Handoff 后的清零** | 新 session DCP 从头跟踪，artifact 提供上层连续性 |
+| **Handoff 后清零** | 新 session DCP 从头跟踪，artifact 提供上层连续性 |
 
 DCP 负责 **当前 session 别撑爆**，artifact 负责 **换 session 别失忆**。
 
@@ -244,7 +256,7 @@ DCP 负责 **当前 session 别撑爆**，artifact 负责 **换 session 别失�
 | Aspect | GSD | 本设计 |
 |---|---|---|
 | 状态位置 | `.planning/*.md` | `.sisyphus/session-handoff.md` |
-| Handoff 触发 | 纯手动 (`/gsd:pause-work`) | 自动 + 手动，可配置 |
+| Handoff 触发 | 纯手动 (`/gsd:pause-work`) | 手动命令 (`/handoff-seal`, `/new-with-history`)
 | Context 压缩 | 无 (依赖 fresh subagent) | DCP + Chapter Index 双保险 |
 | DCP 集成 | 无 | Chapter Index 捕获压缩摘要 |
 | Subagent 产出 | `.planning/phases/*/RESEARCH.md` | Decision Log + Subagent Outputs |
