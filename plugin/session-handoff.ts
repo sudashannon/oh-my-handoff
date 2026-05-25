@@ -1,9 +1,10 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { readFile, writeFile, appendFile, mkdir, stat, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { INHERITED_SECTIONS, CLEAN_TEMPLATE } from "./lib/template"
+import { INHERITED_SECTIONS, MAX_INHERITED_ROWS, CLEAN_TEMPLATE } from "./lib/template"
 import {
   extractSection,
+  truncateTableRows,
   appendTableRow as appendTableRowPure,
 } from "./lib/parse"
 import { writeFileAtomic } from "./lib/io"
@@ -108,7 +109,10 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       const inherited = new Map<string, string>()
       for (const section of INHERITED_SECTIONS) {
         const sec = extractSection(existing.content, section)
-        if (sec) inherited.set(section, sec.trim() + "\n\n")
+        if (sec) {
+          const trimmed = truncateTableRows(sec.trim(), MAX_INHERITED_ROWS)
+          inherited.set(section, trimmed + "\n\n")
+        }
       }
 
       const newHandoffCount = existing.handoffCount + 1

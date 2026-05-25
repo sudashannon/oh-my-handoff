@@ -33,6 +33,37 @@ export function extractSection(content: string, section: string): string {
   return rest.slice(0, endIdx).trimStart()
 }
 
+// Keeps the last `maxRows` data rows of the first markdown table in `content`
+// (older rows are dropped, archive preserves full history). Returns `content`
+// unchanged when there is no table, no separator, or rows already fit.
+export function truncateTableRows(content: string, maxRows: number): string {
+  if (maxRows < 0) return content
+  const lines = content.split("\n")
+
+  const headerIdx = lines.findIndex(l => l.startsWith("|"))
+  if (headerIdx === -1) return content
+  const sepIdx = lines.findIndex((l, i) => i > headerIdx && /^\|\s*---/.test(l))
+  if (sepIdx === -1) return content
+
+  let endIdx = sepIdx + 1
+  while (endIdx < lines.length && lines[endIdx].startsWith("|")) endIdx++
+
+  const dataRows = lines.slice(sepIdx + 1, endIdx)
+  if (dataRows.length <= maxRows) return content
+
+  const dropped = dataRows.length - maxRows
+  const kept = maxRows === 0 ? [] : dataRows.slice(-maxRows)
+  const marker = `<!-- ${dropped} earlier rows trimmed; see .sisyphus/archive/ -->`
+
+  return [
+    ...lines.slice(0, headerIdx),
+    marker,
+    ...lines.slice(headerIdx, sepIdx + 1),
+    ...kept,
+    ...lines.slice(endIdx),
+  ].join("\n")
+}
+
 // Returns null if section / separator / blank-line insertion point not found.
 export function appendTableRow(
   content: string,

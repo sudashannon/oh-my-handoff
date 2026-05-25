@@ -327,3 +327,53 @@ describe("lock helpers", () => {
     expect(isLockHeldByOther(info, "ses_a", 100)).toBe(false)
   })
 })
+
+import { truncateTableRows } from "../lib/parse"
+
+describe("truncateTableRows", () => {
+  const header = "| a | b |"
+  const sep = "|---|---|"
+  const row = (n: number) => `| r${n} | x |`
+
+  it("returns content unchanged when there is no table", () => {
+    expect(truncateTableRows("just prose\nno table", 5)).toBe("just prose\nno table")
+  })
+
+  it("returns content unchanged when there is no separator line", () => {
+    const input = `${header}\n${row(1)}\n${row(2)}`
+    expect(truncateTableRows(input, 1)).toBe(input)
+  })
+
+  it("returns content unchanged when row count fits the limit", () => {
+    const input = [header, sep, row(1), row(2)].join("\n")
+    expect(truncateTableRows(input, 5)).toBe(input)
+  })
+
+  it("keeps only the last maxRows data rows and prepends a marker", () => {
+    const input = [header, sep, row(1), row(2), row(3), row(4), row(5), ""].join("\n")
+    const out = truncateTableRows(input, 2)
+    expect(out).toContain("3 earlier rows trimmed")
+    expect(out).not.toContain(row(1))
+    expect(out).not.toContain(row(2))
+    expect(out).not.toContain(row(3))
+    expect(out).toContain(row(4))
+    expect(out).toContain(row(5))
+    expect(out.indexOf("trimmed")).toBeLessThan(out.indexOf(header))
+  })
+
+  it("preserves trailing non-table content after the table", () => {
+    const input = [header, sep, row(1), row(2), row(3), "", "trailing prose"].join("\n")
+    const out = truncateTableRows(input, 1)
+    expect(out).toContain("trailing prose")
+    expect(out).toContain(row(3))
+    expect(out).not.toContain(row(1))
+  })
+
+  it("handles maxRows=0 by trimming all data rows", () => {
+    const input = [header, sep, row(1), row(2)].join("\n")
+    const out = truncateTableRows(input, 0)
+    expect(out).toContain("2 earlier rows trimmed")
+    expect(out).not.toContain(row(1))
+    expect(out).not.toContain(row(2))
+  })
+})

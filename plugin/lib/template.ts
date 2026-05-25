@@ -1,6 +1,8 @@
 // Pure template + table constants. No side effects.
 // Imported by plugin runtime AND vitest tests so they cannot drift.
 
+export const MAX_INHERITED_ROWS = 20
+
 export const INHERITED_SECTIONS = [
   "Decision Log",
   "Key Artifacts",
