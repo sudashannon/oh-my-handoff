@@ -148,7 +148,25 @@ When session ends: set `status: sealed`, artifact remains for next session.
 
 完整内容参考 [`plans/2026-05-22-session-handoff.md`](plans/2026-05-22-session-handoff.md) 的 Task 2。
 
-### 步骤 3: 重启 OpenCode
+### 步骤 3: 安装 `/handoff` 斜杠命令（可选但推荐）
+
+`/handoff` 让用户随时手动触发 handoff，agent 会刷新 artifact 所有字段并把 `status` 设为 `sealed`。
+
+复制命令文件到全局命令目录（适用于所有项目）：
+
+```bash
+mkdir -p ~/.config/opencode/commands
+cp path/to/oh-my-handoff/commands/handoff.md ~/.config/opencode/commands/
+```
+
+或仅对当前项目生效：
+
+```bash
+mkdir -p .opencode/commands
+cp path/to/oh-my-handoff/commands/handoff.md .opencode/commands/
+```
+
+### 步骤 4: 重启 OpenCode
 
 ```bash
 # 关掉重开
@@ -228,7 +246,10 @@ oh-my-handoff/
 ├── LICENSE                            ← MIT
 ├── plugin/
 │   ├── session-handoff.ts             ← OpenCode Plugin（Hook 层实现）
+│   ├── lib/                           ← 共享纯函数（template / parse / io / lock）
 │   └── __tests__/                     ← Vitest 单元测试
+├── commands/
+│   └── handoff.md                     ← `/handoff` 斜杠命令模板（手动复制到 OpenCode commands 目录）
 ├── examples/
 │   └── handoff-example.md             ← 真实 handoff artifact 示例（仅参考，运行时由插件自动生成）
 ├── specs/
