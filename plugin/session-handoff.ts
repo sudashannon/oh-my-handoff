@@ -94,10 +94,12 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
           const content = await readFile(artifactPath, "utf-8")
           const sidMatch = content.match(/^session_id:\s*"([^"]*)"/m)
           const hcMatch = content.match(/^handoff_count:\s*(\d+)/m)
+          const statusMatch = content.match(/^status:\s*(\w+)/m)
           return {
             exists: true,
             sessionId: sidMatch?.[1] || "",
             handoffCount: hcMatch ? parseInt(hcMatch[1], 10) : 0,
+            status: statusMatch?.[1] || "active",
             content,
           }
         } catch { return { exists: false as const, sessionId: "", handoffCount: 0, content: "" } }
@@ -135,6 +137,20 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
 
       await archiveArtifact(existing.sessionId)
 
+      if (existing.status !== "sealed") {
+        // active (or missing status) → /new or crash recovery → fresh start, no inheritance
+        const template = CLEAN_TEMPLATE(
+          sessionID, "", model,
+          new Date().toISOString(), 0, false, new Map(),
+        )
+        await writeFileAtomic(artifactPath, template)
+        await writeLock(lockPath, { sessionId: sessionID, pid: process.pid, createdAt: Date.now() })
+        await cleanupArchive()
+        await log(`fresh start: session=${sessionID} (previous status: ${existing.status})`)
+        return
+      }
+
+      // status === "sealed" → manual command triggered → handoff with full inheritance
       const inherited = new Map<string, string>()
       for (const section of INHERITED_SECTIONS) {
         const sec = extractSection(existing.content, section)
@@ -145,8 +161,6 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       }
 
       const newHandoffCount = existing.handoffCount + 1
-      // Reaching here means the two early returns above didn't fire,
-      // so we are archiving a previous session — this is a handoff by definition.
       const isHandoff = true
       const parentSession = existing.sessionId
 

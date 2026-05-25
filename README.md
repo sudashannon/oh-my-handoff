@@ -97,10 +97,6 @@ cp -r path/to/oh-my-handoff/plugin ~/.config/opencode/plugins/
 <!-- SESSION_HANDOFF_START -->
 ## Session Handoff System
 
-<session_handoff_config>
-handoff_frequency: medium   # high | medium | low
-</session_handoff_config>
-
 ### Artifact
 
 Path: `{workspace}/.sisyphus/session-handoff.md`
@@ -119,36 +115,23 @@ The agent MUST update the artifact when:
 5. **compress is called** → Before calling compress, record summary in `DCP Chapter Index`
 6. **todowrite changes** → Sync current todo state to `Current State` > `Todo Snapshot`
 
-### Handoff Trigger Conditions
-
-The agent MUST check after each response whether a trigger condition is met:
-
-| Level | Auto Trigger | Manual Trigger |
-|---|---|---|---|
-| high | 30 messages OR 1 DCP compression | User `/handoff` in chat, or `/handoff-seal` slash command |
-| medium (default) | 50 messages OR 2 DCP compressions | User `/handoff` in chat, or `/handoff-seal` slash command |
-| low | 80 messages OR 3 DCP compressions | User `/handoff` in chat, or `/handoff-seal` slash command |
-
-### Handoff Flow
-
-When a trigger condition is met, the agent suggests handoff. On user confirm:
-1. Agent does FINAL REFRESH of all artifact sections
-2. Set frontmatter `status: sealed` (do **not** touch `handoff_count` — the plugin increments it automatically on next session start)
-3. Output handoff instructions
-
 ### New Session Bootstrap
 
-When a new session starts (unseen sessionID), the agent MUST:
-1. Check if `.sisyphus/session-handoff.md` exists
-2. If YES: Read all sections and acknowledge to user — "Resumed from session [xxx], continuing [goal]"
-3. If the artifact shows `status: sealed` → this session was created via `/new`, and intent is handoff/inheritance
-4. If NO artifact and no `.known-sessions` → treat as first session in workspace
+Artifact status determines whether the new session inherits context:
 
-When resuming a previously-seen sessionID, the plugin skips artifact operations — the artifact was already populated for this session. The agent still reads it for context continuity.
+| Artifact status | What happened | Plugin behavior |
+|---|---|---|
+| no artifact | First session in workspace | Creates blank artifact |
+| `status: sealed` | Previous session was sealed by `/handoff-seal` or `/new-with-history` | Archives old artifact, creates new one with inherited sections |
+| `status: active` | Previous session was `/new` or ended normally | Archives old artifact, creates **blank** artifact (no inheritance) |
+
+When the artifact exists, the agent MUST read all sections and acknowledge to the user.
+
+When resuming a previously-seen sessionID (known-sessions), the plugin skips artifact operations — the artifact was already populated for this session.
 
 ### Session End
 
-When session ends: set `status: sealed`, artifact remains for next session.
+No automatic action. User manually invokes `/handoff-seal` or `/new-with-history` to seal the artifact and prepare for context inheritance in the next session.
 <!-- SESSION_HANDOFF_END -->
 ```
 
@@ -198,31 +181,19 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 安装完成后，系统**自动运行**，无需人工干预：
 
 | 时机 | 发生什么 | 谁负责 |
-|---|---|---|---|
+|---|---|---|
 | 每次新消息 | `chat.message` hook 计数 +1 | Plugin |
-| 全新 session 启动 | `initArtifact` 检查 artifact 状态 → 存档旧 session → 创建新 artifact 继承上下文 | Plugin |
+| 全新 session 启动 | `initArtifact` 检查旧 artifact status → sealed 则继承，active 则冷启动空白 artifact | Plugin |
 | Session 恢复（已知 ID） | Plugin 跳过 artifact 操作，直接继续 | Plugin |
 | 并发 session 启动 | Plugin 创建独立 artifact，不修改主 artifact | Plugin |
 | Session compaction | `experimental.session.compacting` hook 自动写入 Chapter Index + 注入 artifact 上下文 | Plugin |
 | 做出关键决策 | agent 追加到 Decision Log | 行为层 |
 | 子代理 (task) 返回高价值产出 | agent 提取到 Subagent Outputs | 行为层 |
-| Session 消息数或压缩频率超标 | agent 提示"建议 handoff" | 行为层 |
-| 用户确认 handoff | agent 刷新 artifact → status sealed → 输出引导信息 | 行为层 |
 | 新 session 启动 | agent 检测到 artifact → 读取全部状态 → 继续工作 | 行为层 |
 
-### Handoff 触发阈值
-
-| 等级 | 自动触发 | 手动触发 |
-|---|---|---|---|
-| high | 30 条消息 或 1 次 DCP compression | 用户 `/handoff-seal` 随时 |
-| medium（默认）| 50 条消息 或 2 次 DCP compression | 用户 `/handoff-seal` 随时 |
-| low | 80 条消息 或 3 次 DCP compression | 仅用户 `/handoff-seal` |
-
-> 💡 有四种手动触发方式：
-> - 在聊天框输入 `/handoff` → agent 通过 AGENTS.md 规则识别并执行 handoff
-> - 安装 `handoff-seal.md` 后使用 `/handoff-seal` 斜杠命令 → 还会自动填充 `goal` 字段
-> - OpenCode 内置的 `/handoff` 命令 → 生成 session 摘要（功能不同，互不冲突）
-> - 安装 `new-with-history.md` 后使用 `/new-with-history` → 密封后引导用户用 `/new` 开继承 session
+> 💡 有两种手动命令触发上下文传递：
+> - 使用 `/handoff-seal` → 密封 artifact，输出 handoff 引导信息
+> - 使用 `/new-with-history` → 密封 artifact，引导用户用 `/new` 开继承 session
 
 ### Session 感知（Known Sessions）
 
@@ -230,8 +201,9 @@ Plugin 自动追踪所有见过的 sessionID 到 `.sisyphus/.known-sessions`，�
 
 | 场景 | Plugin 行为 |
 |---|---|
-| **全新 sessionID**（`/new` 或首次启动） | 调用 `initArtifact`：检查旧 artifact → 存档旧 session → 创建新 artifact 继承上下文 |
-| **已知 sessionID**（用户切回之前的 session） | 跳过 artifact 操作，直接继续。artifact 内容不变，无重复存档 |
+| **全新 sessionID + artifact status: sealed** | 存档旧 artifact → 创建新 artifact **继承**所有 sections（手动命令生效） |
+| **全新 sessionID + artifact status: active** | 存档旧 artifact → 创建**空白** artifact（`/new` 冷启动） |
+| **已知 sessionID**（用户切回之前的 session） | 跳过 artifact 操作，直接继续。artifact 内容不变 |
 | **并发 session**（另一个进程持有锁） | 创建独立 artifact `.sisyphus/session-handoff-standalone-<sid>.md` 独立运行 |
 
 ### `/new-with-history` 斜杠命令
@@ -246,22 +218,6 @@ Plugin 自动追踪所有见过的 sessionID 到 `.sisyphus/.known-sessions`，�
 
 ```bash
 cp path/to/oh-my-handoff/commands/new-with-history.md ~/.config/opencode/commands/
-```
-
-### Handoff 流程
-
-```
-当前 session 达到 N 条消息 (配置阈值 M)
-  → Agent 提示: "当前 session 已达 N 条消息，建议 handoff。继续还是换新 session?"
-  → 用户确认换:
-    1. Agent 刷新 artifact 所有字段
-    2. 设置 status: sealed（handoff_count 由插件在下个 session 启动时自动 +1）
-    3. 输出: "Handoff 完成。新 session 打开后 artifact 将被自动加载。"
-  → 新 session 中:
-    1. Agent 自动检测到 artifact 存在
-    2. 读取全部 7 个 section
-    3. 汇报: "从 session [xxx] 恢复，继续 [goal]"
-    4. 零冷启动，直接继续
 ```
 
 ### 验证安装
