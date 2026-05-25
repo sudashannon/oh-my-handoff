@@ -138,10 +138,13 @@ When a trigger condition is met, the agent suggests handoff. On user confirm:
 
 ### New Session Bootstrap
 
-When a new session starts, the agent MUST:
+When a new session starts (unseen sessionID), the agent MUST:
 1. Check if `.sisyphus/session-handoff.md` exists
-2. If YES: Read all sections and acknowledge to user
-3. If NO: Treat as fresh session
+2. If YES: Read all sections and acknowledge to user — "Resumed from session [xxx], continuing [goal]"
+3. If the artifact shows `status: sealed` → this session was created via `/new`, and intent is handoff/inheritance
+4. If NO artifact and no `.known-sessions` → treat as first session in workspace
+
+When resuming a previously-seen sessionID, the plugin skips artifact operations — the artifact was already populated for this session. The agent still reads it for context continuity.
 
 ### Session End
 
@@ -195,8 +198,11 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 安装完成后，系统**自动运行**，无需人工干预：
 
 | 时机 | 发生什么 | 谁负责 |
-|---|---|---|
+|---|---|---|---|
 | 每次新消息 | `chat.message` hook 计数 +1 | Plugin |
+| 全新 session 启动 | `initArtifact` 检查 artifact 状态 → 存档旧 session → 创建新 artifact 继承上下文 | Plugin |
+| Session 恢复（已知 ID） | Plugin 跳过 artifact 操作，直接继续 | Plugin |
+| 并发 session 启动 | Plugin 创建独立 artifact，不修改主 artifact | Plugin |
 | Session compaction | `experimental.session.compacting` hook 自动写入 Chapter Index + 注入 artifact 上下文 | Plugin |
 | 做出关键决策 | agent 追加到 Decision Log | 行为层 |
 | 子代理 (task) 返回高价值产出 | agent 提取到 Subagent Outputs | 行为层 |
@@ -212,10 +218,35 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 | medium（默认）| 50 条消息 或 2 次 DCP compression | 用户 `/handoff-seal` 随时 |
 | low | 80 条消息 或 3 次 DCP compression | 仅用户 `/handoff-seal` |
 
-> 💡 有三种手动触发方式：
+> 💡 有四种手动触发方式：
 > - 在聊天框输入 `/handoff` → agent 通过 AGENTS.md 规则识别并执行 handoff
 > - 安装 `handoff-seal.md` 后使用 `/handoff-seal` 斜杠命令 → 还会自动填充 `goal` 字段
 > - OpenCode 内置的 `/handoff` 命令 → 生成 session 摘要（功能不同，互不冲突）
+> - 安装 `new-with-history.md` 后使用 `/new-with-history` → 密封后引导用户用 `/new` 开继承 session
+
+### Session 感知（Known Sessions）
+
+Plugin 自动追踪所有见过的 sessionID 到 `.sisyphus/.known-sessions`，区分"全新 session"和"session 切换/恢复"：
+
+| 场景 | Plugin 行为 |
+|---|---|
+| **全新 sessionID**（`/new` 或首次启动） | 调用 `initArtifact`：检查旧 artifact → 存档旧 session → 创建新 artifact 继承上下文 |
+| **已知 sessionID**（用户切回之前的 session） | 跳过 artifact 操作，直接继续。artifact 内容不变，无重复存档 |
+| **并发 session**（另一个进程持有锁） | 创建独立 artifact `.sisyphus/session-handoff-standalone-<sid>.md` 独立运行 |
+
+### `/new-with-history` 斜杠命令
+
+与 `/handoff-seal` 类似，专用于"想开新 `/new` 但希望继承当前上下文"的场景：
+
+1. 密封当前 artifact（填充 `goal`、设 `status: sealed`）
+2. 刷新所有 sections（决策、文件、产出、状态、下一步）
+3. Agent 回复："Artifact sealed. Type `\`/new` to start a fresh session that inherits all context..."
+
+**安装方式**（同 `/handoff-seal`）：
+
+```bash
+cp path/to/oh-my-handoff/commands/new-with-history.md ~/.config/opencode/commands/
+```
 
 ### Handoff 流程
 
@@ -259,7 +290,8 @@ oh-my-handoff/
 │   ├── lib/                           ← 共享纯函数（template / parse / io / lock）
 │   └── __tests__/                     ← Vitest 单元测试
 ├── commands/
-│   └── handoff-seal.md                 ← `/handoff-seal` 斜杠命令模板（手动复制到 OpenCode commands 目录，不冲突）
+│   ├── handoff-seal.md                 ← `/handoff-seal` 斜杠命令模板
+│   └── new-with-history.md             ← `/new-with-history` 斜杠命令模板
 ├── examples/
 │   └── handoff-example.md             ← 真实 handoff artifact 示例（仅参考，运行时由插件自动生成）
 ├── specs/

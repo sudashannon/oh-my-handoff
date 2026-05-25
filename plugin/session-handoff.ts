@@ -14,11 +14,14 @@ const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const ARCHIVE_DIR = ".sisyphus/archive"
 const MAX_ARCHIVE = 20
 const LOCK_FILE = ".sisyphus/.session-lock"
+const KNOWN_SESSIONS_FILE = ".sisyphus/.known-sessions"
+const STANDALONE_PREFIX = "session-handoff-standalone"
 
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
-  const artifactPath = join(directory, ARTIFACT_NAME)
+  let artifactPath = join(directory, ARTIFACT_NAME)
   const archiveDir = join(directory, ARCHIVE_DIR)
   const lockPath = join(directory, LOCK_FILE)
+  const knownSessionsPath = join(directory, KNOWN_SESSIONS_FILE)
 
   let currentSession = ""
   let msgCount = 0
@@ -67,6 +70,23 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
     } catch {}
   }
 
+  type KnownSessions = Set<string>
+
+  async function readKnownSessions(): Promise<KnownSessions> {
+    try {
+      const raw = await readFile(knownSessionsPath, "utf-8")
+      const arr: string[] = JSON.parse(raw)
+      return new Set(arr)
+    } catch {
+      return new Set()
+    }
+  }
+
+  async function writeKnownSessions(sessions: KnownSessions): Promise<void> {
+    const arr = Array.from(sessions)
+    await writeFileAtomic(knownSessionsPath, JSON.stringify(arr))
+  }
+
   async function initArtifact(sessionID: string, model: string): Promise<void> {
     try {
       const readExisting = async () => {
@@ -97,9 +117,18 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
 
       const lock = await readLock(lockPath)
       if (isLockHeldByOther(lock, sessionID, process.pid)) {
+        artifactPath = join(
+          directory,
+          `.sisyphus/${STANDALONE_PREFIX}-${sessionID}.md`,
+        )
+        const template = CLEAN_TEMPLATE(
+          sessionID, "", model,
+          new Date().toISOString(), 0, false, new Map(),
+        )
+        await writeFileAtomic(artifactPath, template)
         await log(
-          `lock held by live session pid=${lock!.pid} sid=${lock!.sessionId} — standing down, ` +
-          `not archiving artifact for ${existing.sessionId}`,
+          `concurrent session — lock held by pid=${lock!.pid} sid=${lock!.sessionId} ` +
+          `— standalone artifact for ${sessionID}`,
         )
         return
       }
@@ -156,16 +185,26 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         const sid = input.sessionID
 
         if (sid !== currentSession) {
+          const known = await readKnownSessions()
+          const isNew = !known.has(sid)
+
+          if (isNew) {
+            known.add(sid)
+            await writeKnownSessions(known)
+
+            const modelStr = input.model
+              ? `${input.model.providerID}/${input.model.modelID}`
+              : "unknown"
+
+            await initArtifact(sid, modelStr)
+            await log(`session start: ${sid} (new, model=${modelStr})`)
+          } else {
+            await log(`session resume: ${sid}`)
+          }
+
           currentSession = sid
           msgCount = 0
           compactionCount = 0
-
-          const modelStr = input.model
-            ? `${input.model.providerID}/${input.model.modelID}`
-            : "unknown"
-
-          await initArtifact(sid, modelStr)
-          await log(`session start: ${sid} (model: ${modelStr})`)
         }
 
         msgCount++
