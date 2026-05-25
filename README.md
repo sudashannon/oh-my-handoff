@@ -124,16 +124,16 @@ The agent MUST update the artifact when:
 The agent MUST check after each response whether a trigger condition is met:
 
 | Level | Auto Trigger | Manual Trigger |
-|---|---|---|
-| high | 30 messages OR 1 DCP compression | User `/handoff` anytime |
-| medium (default) | 50 messages OR 2 DCP compressions | User `/handoff` anytime |
-| low | 80 messages OR 3 DCP compressions | User `/handoff` anytime |
+|---|---|---|---|
+| high | 30 messages OR 1 DCP compression | User `/handoff` in chat, or `/handoff-seal` slash command |
+| medium (default) | 50 messages OR 2 DCP compressions | User `/handoff` in chat, or `/handoff-seal` slash command |
+| low | 80 messages OR 3 DCP compressions | User `/handoff` in chat, or `/handoff-seal` slash command |
 
 ### Handoff Flow
 
 When a trigger condition is met, the agent suggests handoff. On user confirm:
 1. Agent does FINAL REFRESH of all artifact sections
-2. Set frontmatter `status: sealed`, increment `handoff_count`
+2. Set frontmatter `status: sealed` (do **not** touch `handoff_count` — the plugin increments it automatically on next session start)
 3. Output handoff instructions
 
 ### New Session Bootstrap
@@ -212,9 +212,10 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 | medium（默认）| 50 条消息 或 2 次 DCP compression | 用户 `/handoff-seal` 随时 |
 | low | 80 条消息 或 3 次 DCP compression | 仅用户 `/handoff-seal` |
 
-> OpenCode 内置了 `/handoff` 命令（生成 session 摘要），与本系统的 `/handoff-seal` 命令功能不同，互不冲突。
-
-注意：上述表格中的 `/handoff` 指**在聊天框输入**的一条消息让 agent 识别并执行 handoff（由 AGENTS.md 行为规则处理）。安装了 `commands/handoff-seal.md` 后也可以用 `/handoff-seal` 斜杠命令实现相同效果，两者任选其一。
+> 💡 有三种手动触发方式：
+> - 在聊天框输入 `/handoff` → agent 通过 AGENTS.md 规则识别并执行 handoff
+> - 安装 `handoff-seal.md` 后使用 `/handoff-seal` 斜杠命令 → 还会自动填充 `goal` 字段
+> - OpenCode 内置的 `/handoff` 命令 → 生成 session 摘要（功能不同，互不冲突）
 
 ### Handoff 流程
 
@@ -223,7 +224,7 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
   → Agent 提示: "当前 session 已达 N 条消息，建议 handoff。继续还是换新 session?"
   → 用户确认换:
     1. Agent 刷新 artifact 所有字段
-    2. 设置 status: sealed，increment handoff_count
+    2. 设置 status: sealed（handoff_count 由插件在下个 session 启动时自动 +1）
     3. 输出: "Handoff 完成。新 session 打开后 artifact 将被自动加载。"
   → 新 session 中:
     1. Agent 自动检测到 artifact 存在
