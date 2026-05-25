@@ -148,22 +148,24 @@ When session ends: set `status: sealed`, artifact remains for next session.
 
 完整内容参考 [`plans/2026-05-22-session-handoff.md`](plans/2026-05-22-session-handoff.md) 的 Task 2。
 
-### 步骤 3: 安装 `/handoff` 斜杠命令（可选但推荐）
+### 步骤 3: 安装 `/handoff-seal` 斜杠命令（可选但推荐）
 
-`/handoff` 让用户随时手动触发 handoff，agent 会刷新 artifact 所有字段并把 `status` 设为 `sealed`。
+> ⚠️ OpenCode 自带内置的 `/handoff` 命令（创建 session 摘要）。为了避免冲突，oh-my-handoff 使用 `/handoff-seal` 作为自定义命令名。
+
+`/handoff-seal` 让用户随时手动触发 handoff 终结流程：agent 会推断并填充 `goal` 字段、刷新 artifact 所有 sections、并把 `status` 设为 `sealed`。
 
 复制命令文件到全局命令目录（适用于所有项目）：
 
 ```bash
 mkdir -p ~/.config/opencode/commands
-cp path/to/oh-my-handoff/commands/handoff.md ~/.config/opencode/commands/
+cp path/to/oh-my-handoff/commands/handoff-seal.md ~/.config/opencode/commands/
 ```
 
 或仅对当前项目生效：
 
 ```bash
 mkdir -p .opencode/commands
-cp path/to/oh-my-handoff/commands/handoff.md .opencode/commands/
+cp path/to/oh-my-handoff/commands/handoff-seal.md .opencode/commands/
 ```
 
 ### 步骤 4: 重启 OpenCode
@@ -202,10 +204,14 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 ### Handoff 触发阈值
 
 | 等级 | 自动触发 | 手动触发 |
-|---|---|---|
-| high | 30 条消息 或 1 次 DCP compression | 用户 `/handoff` 随时 |
-| medium（默认）| 50 条消息 或 2 次 DCP compression | 用户 `/handoff` 随时 |
-| low | 80 条消息 或 3 次 DCP compression | 仅用户 `/handoff` |
+|---|---|---|---|
+| high | 30 条消息 或 1 次 DCP compression | 用户 `/handoff-seal` 随时 |
+| medium（默认）| 50 条消息 或 2 次 DCP compression | 用户 `/handoff-seal` 随时 |
+| low | 80 条消息 或 3 次 DCP compression | 仅用户 `/handoff-seal` |
+
+> OpenCode 内置了 `/handoff` 命令（生成 session 摘要），与本系统的 `/handoff-seal` 命令功能不同，互不冲突。
+
+注意：上述表格中的 `/handoff` 指**在聊天框输入**的一条消息让 agent 识别并执行 handoff（由 AGENTS.md 行为规则处理）。安装了 `commands/handoff-seal.md` 后也可以用 `/handoff-seal` 斜杠命令实现相同效果，两者任选其一。
 
 ### Handoff 流程
 
@@ -249,7 +255,7 @@ oh-my-handoff/
 │   ├── lib/                           ← 共享纯函数（template / parse / io / lock）
 │   └── __tests__/                     ← Vitest 单元测试
 ├── commands/
-│   └── handoff.md                     ← `/handoff` 斜杠命令模板（手动复制到 OpenCode commands 目录）
+│   └── handoff-seal.md                 ← `/handoff-seal` 斜杠命令模板（手动复制到 OpenCode commands 目录，不冲突）
 ├── examples/
 │   └── handoff-example.md             ← 真实 handoff artifact 示例（仅参考，运行时由插件自动生成）
 ├── specs/
