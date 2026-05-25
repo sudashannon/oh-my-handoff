@@ -1,10 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { readFile, writeFile, appendFile, mkdir, stat, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
-import { homedir } from "node:os"
 
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
-const PRESSURE_MARKER = ".sisyphus/context-pressure"
 const STATE_FILE = ".sisyphus/.plugin-state.json"
 const ARCHIVE_DIR = ".sisyphus/archive"
 const MAX_ARCHIVE = 20
@@ -85,7 +83,6 @@ ${rows("DCP Chapter Index")}
 
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   const artifactPath = join(directory, ARTIFACT_NAME)
-  const pressurePath = join(directory, PRESSURE_MARKER)
   const statePath = join(directory, STATE_FILE)
   const archiveDir = join(directory, ARCHIVE_DIR)
 
@@ -316,23 +313,6 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
         await log(
           `compaction #${compactionCount} session=${currentSession} msg_count=${msgCount}`,
         )
-      } catch {}
-    },
-
-    "tool.execute.after": async (input, _output) => {
-      try {
-        const storageDir = join(
-          process.env.HOME || homedir(),
-          ".local/share/opencode/storage/plugin/dcp",
-        )
-        const sessionFile = join(storageDir, `${input.sessionID}.json`)
-        try {
-          const stats = await stat(sessionFile)
-          if (Date.now() - stats.mtimeMs > 60000) return
-        } catch {
-          return
-        }
-        await writeFile(pressurePath, `${Date.now()}\n`, { flag: "a" })
       } catch {}
     },
   }
