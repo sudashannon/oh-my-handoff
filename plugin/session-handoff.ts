@@ -142,21 +142,26 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
 
   async function archiveArtifact(oldSessionId: string): Promise<void> {
     try {
-      const dest = join(archiveDir, `ses_${oldSessionId}.md`)
+      const ts = new Date().toISOString().replace(/[-:.]/g, "")
+      const filename = `${ts}_ses_${oldSessionId}.md`
+      const dest = join(archiveDir, filename)
       await writeFile(dest, await readFile(artifactPath, "utf-8"))
-      await log(`archived: ses_${oldSessionId}.md`)
+      await log(`archived: ${filename}`)
     } catch {}
   }
 
   async function cleanupArchive(): Promise<void> {
     try {
       const entries = await readdir(archiveDir)
-      const files = entries.filter(f => f.startsWith("ses_") && f.endsWith(".md"))
-      if (files.length <= MAX_ARCHIVE) return
+      const candidates = entries.filter(f => f.endsWith(".md") && (f.startsWith("ses_") || /^\d{8}T\d/.test(f)))
+      if (candidates.length <= MAX_ARCHIVE) return
 
-      const sorted = files.sort()
-      const toDelete = sorted.slice(0, files.length - MAX_ARCHIVE)
-      for (const f of toDelete) {
+      const stats = await Promise.all(
+        candidates.map(async f => ({ f, mtime: (await stat(join(archiveDir, f))).mtimeMs }))
+      )
+      stats.sort((a, b) => a.mtime - b.mtime)
+      const toDelete = stats.slice(0, stats.length - MAX_ARCHIVE)
+      for (const { f } of toDelete) {
         await unlink(join(archiveDir, f))
         await log(`archive cleanup: removed ${f}`)
       }
