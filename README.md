@@ -122,7 +122,7 @@ Artifact status determines whether the new session inherits context:
 | Artifact status | What happened | Plugin behavior |
 |---|---|---|
 | no artifact | First session in workspace | Creates blank artifact |
-| `status: sealed` | Previous session was sealed by `/handoff-seal` or `/new-with-history` | Archives old artifact, creates new one with inherited sections |
+| `status: sealed` | Previous session was sealed by `/handoff-seal` | Archives old artifact, creates new one with inherited sections |
 | `status: active` | Previous session was `/new` or ended normally | Archives old artifact, creates **blank** artifact (no inheritance) |
 
 When the artifact exists, the agent MUST read all sections and acknowledge to the user.
@@ -131,7 +131,7 @@ When resuming a previously-seen sessionID (known-sessions), the plugin skips art
 
 ### Session End
 
-No automatic action. User manually invokes `/handoff-seal` or `/new-with-history` to seal the artifact and prepare for context inheritance in the next session.
+No automatic action. User manually invokes `/handoff-seal` to seal the artifact and prepare for context inheritance in the next session.
 <!-- SESSION_HANDOFF_END -->
 ```
 
@@ -191,9 +191,8 @@ grep "session-handoff" ~/.local/share/opencode/log/$(ls -t ~/.local/share/openco
 | 子代理 (task) 返回高价值产出 | agent 提取到 Subagent Outputs | 行为层 |
 | 新 session 启动 | agent 检测到 artifact → 读取全部状态 → 继续工作 | 行为层 |
 
-> 💡 有两种手动命令触发上下文传递：
-> - 使用 `/handoff-seal` → 密封 artifact，输出 handoff 引导信息
-> - 使用 `/new-with-history` → 密封 artifact，引导用户用 `/new` 开继承 session
+> 💡 只有一条手动命令触发上下文传递：
+> - 使用 `/handoff-seal` → 密封 artifact，开新 session 时自动继承
 
 ### Session 感知（Known Sessions）
 
@@ -205,20 +204,6 @@ Plugin 自动追踪所有见过的 sessionID 到 `.sisyphus/.known-sessions`，�
 | **全新 sessionID + artifact status: active** | 存档旧 artifact → 创建**空白** artifact（`/new` 冷启动） |
 | **已知 sessionID**（用户切回之前的 session） | 跳过 artifact 操作，直接继续。artifact 内容不变 |
 | **并发 session**（另一个进程持有锁） | 创建独立 artifact `.sisyphus/session-handoff-standalone-<sid>.md` 独立运行 |
-
-### `/new-with-history` 斜杠命令
-
-与 `/handoff-seal` 类似，专用于"想开新 `/new` 但希望继承当前上下文"的场景：
-
-1. 密封当前 artifact（填充 `goal`、设 `status: sealed`）
-2. 刷新所有 sections（决策、文件、产出、状态、下一步）
-3. Agent 回复："Artifact sealed. Type `\`/new` to start a fresh session that inherits all context..."
-
-**安装方式**（同 `/handoff-seal`）：
-
-```bash
-cp path/to/oh-my-handoff/commands/new-with-history.md ~/.config/opencode/commands/
-```
 
 ### 验证安装
 
@@ -247,7 +232,6 @@ oh-my-handoff/
 │   └── __tests__/                     ← Vitest 单元测试
 ├── commands/
 │   ├── handoff-seal.md                 ← `/handoff-seal` 斜杠命令模板
-│   └── new-with-history.md             ← `/new-with-history` 斜杠命令模板
 ├── examples/
 │   └── handoff-example.md             ← 真实 handoff artifact 示例（仅参考，运行时由插件自动生成）
 ├── specs/

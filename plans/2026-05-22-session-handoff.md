@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement session handoff system with DCP Chapter Index, structured artifact, and AGENTS.md behavior rules. Session context transfer is triggered **only** by manual commands (`/handoff-seal` and `/new-with-history`); no agent auto-triggered handoff.
+**Goal:** Implement session handoff system with DCP Chapter Index, structured artifact, and AGENTS.md behavior rules. Session context transfer is triggered **only** by the manual `/handoff-seal` command; no agent auto-triggered handoff.
 
 **Architecture:** Two changes: (1) Create `.sisyphus/session-handoff.md` template + directory structure (2) Add `<session_handoff>` behavior section to AGENTS.md defining maintenance rules, trigger conditions, handoff flow, and new-session bootstrap. DCP Chapter Index is handled via agent behavioral rules (agent invokes compress → records summary), not via plugin modification.
 
@@ -151,7 +151,7 @@ Artifact status determines what the new session inherits:
 | Artifact status | What happened | Plugin behavior |
 |---|---|---|
 | no artifact | First session in workspace | Creates blank artifact |
-| `status: sealed` | Previous session sealed by `/handoff-seal` or `/new-with-history` | Archives old artifact, creates new one with inherited sections |
+| `status: sealed` | Previous session sealed by `/handoff-seal` | Archives old artifact, creates new one with inherited sections |
 | `status: active` | Previous session was `/new` or ended normally | Archives old artifact, creates **blank** artifact (no inheritance) |
 
 When the artifact exists, the agent MUST read all sections and acknowledge to the user.
@@ -160,7 +160,7 @@ When resuming a previously-seen sessionID (known-sessions), the plugin skips art
 
 ### Session End
 
-No automatic action. User manually invokes `/handoff-seal` or `/new-with-history` to seal the artifact and prepare for context inheritance in the next session.
+No automatic action. User manually invokes `/handoff-seal` to seal the artifact and prepare for context inheritance in the next session.
 <!-- SESSION_HANDOFF_END -->
 ```
 

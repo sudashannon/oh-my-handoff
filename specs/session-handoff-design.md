@@ -130,7 +130,6 @@ DCP 每次压缩执行后，自动写入一条索引 + 摘要。
 | 命令 | 效果 | 适用场景 |
 |---|---|---|
 | `/handoff-seal` | 密封 artifact，agent 输出 handoff 引导信息 | 准备结束当前 session，下个 session 继承 |
-| `/new-with-history` | 密封 artifact，引导用户用 `/new` | 想在当前 session 继续工作，但先创建继承 session |
 
 两个命令执行相同的底层操作：agent 填充 `goal`、刷新所有 sections、设 `status: sealed`。区别仅在于给用户的回复内容不同。
 
@@ -191,14 +190,12 @@ Agent 每次执行关键操作后:
 上下文传递只通过两条手动命令触发：
 
 ```
-用户随时执行 /handoff-seal 或 /new-with-history:
+用户随时执行 /handoff-seal:
   ├── Agent 执行最终刷新 artifact
   │   ├── 填充 goal 字段
   │   ├── 更新所有 sections 为最新状态
   │   └── 将 status 从 active 改为 sealed
-  ├── Agent 输出回复:
-  │   ├── /handoff-seal → "Handoff ready. Start a fresh OpenCode session..."
-  │   └── /new-with-history → "Artifact sealed. Type /new to start a fresh session..."
+  ├── Agent 回复: "Handoff ready. Start a fresh OpenCode session..."
   └── 用户按引导操作:
       ├── 新 session 启动
       ├── Plugin 检测到 artifact status=sealed
@@ -256,7 +253,7 @@ DCP 负责 **当前 session 别撑爆**，artifact 负责 **换 session 别失�
 | Aspect | GSD | 本设计 |
 |---|---|---|
 | 状态位置 | `.planning/*.md` | `.sisyphus/session-handoff.md` |
-| Handoff 触发 | 纯手动 (`/gsd:pause-work`) | 手动命令 (`/handoff-seal`, `/new-with-history`)
+| Handoff 触发 | 纯手动 (`/gsd:pause-work`) | 手动命令 (`/handoff-seal`)
 | Context 压缩 | 无 (依赖 fresh subagent) | DCP + Chapter Index 双保险 |
 | DCP 集成 | 无 | Chapter Index 捕获压缩摘要 |
 | Subagent 产出 | `.planning/phases/*/RESEARCH.md` | Decision Log + Subagent Outputs |
