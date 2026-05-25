@@ -5,7 +5,6 @@ import { join } from "node:path"
 import { INHERITED_SECTIONS, CLEAN_TEMPLATE } from "../lib/template"
 import {
   extractSection,
-  parseState,
   readFrontmatter,
   appendTableRow,
 } from "../lib/parse"
@@ -100,21 +99,6 @@ describe("extractSection", () => {
   it("stops at next section header", () => {
     const result = extractSection(artifact, "Decision Log")
     expect(result).not.toContain("Key Artifacts")
-  })
-})
-
-describe("parseState", () => {
-  it("parses valid JSON", () => {
-    expect(parseState('{"lastSession":"ses_a","handoffCount":5}'))
-      .toEqual({ lastSession: "ses_a", handoffCount: 5 })
-  })
-
-  it("returns defaults for empty JSON", () => {
-    expect(parseState("{}")).toEqual({ lastSession: "", handoffCount: 0 })
-  })
-
-  it("returns defaults for invalid JSON", () => {
-    expect(parseState("boom")).toEqual({ lastSession: "", handoffCount: 0 })
   })
 })
 

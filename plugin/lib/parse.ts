@@ -1,23 +1,6 @@
 // Pure parsing / serialisation helpers. No file I/O.
 // Imported by plugin runtime AND vitest tests so they cannot drift.
 
-export type PluginState = {
-  lastSession: string
-  handoffCount: number
-}
-
-export function parseState(raw: string): PluginState {
-  try {
-    const j = JSON.parse(raw)
-    return {
-      lastSession: String(j.lastSession || ""),
-      handoffCount: Number(j.handoffCount || 0),
-    }
-  } catch {
-    return { lastSession: "", handoffCount: 0 }
-  }
-}
-
 export type Frontmatter = {
   sessionId?: string
   handoffCount?: number
