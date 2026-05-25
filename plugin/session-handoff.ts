@@ -1,85 +1,18 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { readFile, writeFile, appendFile, mkdir, stat, readdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
+import { INHERITED_SECTIONS, CLEAN_TEMPLATE } from "./lib/template"
+import {
+  parseState,
+  type PluginState,
+  extractSection,
+  appendTableRow as appendTableRowPure,
+} from "./lib/parse"
 
 const ARTIFACT_NAME = ".sisyphus/session-handoff.md"
 const STATE_FILE = ".sisyphus/.plugin-state.json"
 const ARCHIVE_DIR = ".sisyphus/archive"
 const MAX_ARCHIVE = 20
-
-const INHERITED_SECTIONS = [
-  "Decision Log",
-  "Key Artifacts",
-  "Subagent Outputs",
-  "Design Outputs",
-  "DCP Chapter Index",
-]
-
-const TABLE_HEADERS: Record<string, string> = {
-  "Decision Log": "| Time | Decision | Context | Alternatives | Rationale |",
-  "Key Artifacts": "| File | Purpose | Status |",
-  "Subagent Outputs": "| Agent | Task | Key Finding | Timestamp |",
-  "Design Outputs": "| Skill | Output | Path |",
-  "DCP Chapter Index": "| # | Range | Topic | Summary | DCP Summary |",
-}
-
-const TABLE_SEPARATORS: Record<string, string> = {
-  "Decision Log": "|---|---|---|---|---|",
-  "Key Artifacts": "|---|---|---|",
-  "Subagent Outputs": "|---|---|---|---|",
-  "Design Outputs": "|---|---|---|",
-  "DCP Chapter Index": "|---|---|---|---|---|",
-}
-
-function CLEAN_TEMPLATE(
-  sid: string, parent: string, model: string, created: string,
-  handoff: number, isHandoff: boolean,
-  inherited: Map<string, string>,
-) {
-  const rows = (section: string) =>
-    inherited.get(section) ||
-    `${TABLE_HEADERS[section]}\n${TABLE_SEPARATORS[section]}\n`
-
-  return `---
-session_id: "${sid}"
-parent_session: "${parent}"
-model: "${model}"
-created: "${created}"
-status: active
-goal: ""
-tags: []
-handoff_count: ${handoff}
-is_handoff: ${isHandoff}
----
-
-# Session Handoff
-
-## Decision Log
-
-${rows("Decision Log")}
-## Key Artifacts
-
-${rows("Key Artifacts")}
-## Subagent Outputs (High-Value)
-
-${rows("Subagent Outputs")}
-## Design Outputs
-
-${rows("Design Outputs")}
-## DCP Chapter Index
-
-${rows("DCP Chapter Index")}
-## Current State
-
-- **Active Goal:**
-- **Blockers:**
-- **Todo Snapshot:**
-- **Open Questions:**
-
-## Next Steps
-
-`
-}
 
 export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   const artifactPath = join(directory, ARTIFACT_NAME)
@@ -89,17 +22,6 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   let currentSession = ""
   let msgCount = 0
   let compactionCount = 0
-
-  type PluginState = { lastSession: string; handoffCount: number }
-
-  function parseState(raw: string): PluginState {
-    try {
-      const j = JSON.parse(raw)
-      return { lastSession: String(j.lastSession || ""), handoffCount: Number(j.handoffCount || 0) }
-    } catch {
-      return { lastSession: "", handoffCount: 0 }
-    }
-  }
 
   async function loadState(): Promise<PluginState> {
     try { return parseState(await readFile(statePath, "utf-8")) }
@@ -123,18 +45,6 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
 
   async function saveState(s: PluginState): Promise<void> {
     await writeFile(statePath, JSON.stringify(s, null, 2))
-  }
-
-  function extractSection(content: string, section: string): string {
-    const startMarker = `## ${section}`
-    const idx = content.indexOf(startMarker)
-    if (idx === -1) return ""
-
-    const rest = content.slice(idx + startMarker.length)
-    const nextSectionMatch = rest.match(/\n## /)
-    const endIdx = nextSectionMatch ? nextSectionMatch.index! : rest.length
-
-    return rest.slice(0, endIdx).trimStart()
   }
 
   async function archiveArtifact(oldSessionId: string): Promise<void> {
@@ -202,8 +112,8 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
       }
 
       const newHandoffCount = existing.handoffCount + 1
-      // We only reach this branch after passing both early returns (no artifact / same session),
-      // so by definition we are archiving a previous session — this IS a handoff.
+      // Reaching here means the two early returns above didn't fire,
+      // so we are archiving a previous session — this is a handoff by definition.
       const isHandoff = true
       const parentSession = existing.sessionId
 
@@ -230,27 +140,8 @@ export const SessionHandoffPlugin: Plugin = async ({ $, directory }) => {
   async function appendTableRow(section: string, values: string[]): Promise<void> {
     try {
       const content = await readFile(artifactPath, "utf-8")
-      const row = `| ${values.join(" | ")} |\n`
-      const sectionIndex = content.indexOf(`## ${section}`)
-      if (sectionIndex === -1) return
-
-      const afterSection = content.slice(sectionIndex)
-      const lines = afterSection.split("\n")
-
-      let separatorIdx = -1
-      for (let i = 0; i < lines.length; i++) {
-        if (/^\|---/.test(lines[i])) { separatorIdx = i; break }
-      }
-      if (separatorIdx === -1) return
-
-      let insertAt = -1
-      for (let i = separatorIdx + 1; i < lines.length; i++) {
-        if (lines[i].trim() === "") { insertAt = i; break }
-      }
-      if (insertAt === -1) return
-
-      lines.splice(insertAt, 0, row)
-      const newContent = content.slice(0, sectionIndex) + lines.join("\n")
+      const newContent = appendTableRowPure(content, section, values)
+      if (newContent === null) return
       await writeFile(artifactPath, newContent)
     } catch {}
   }
